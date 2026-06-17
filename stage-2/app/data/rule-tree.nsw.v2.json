@@ -1,0 +1,248 @@
+{
+  "$comment": "Fables Stage 1 complete build. Scenarios 1-6 all worked to canonical depth. Validates against schema in spec/rule-tree.nsw.v1.json. NO numeric fault percentage is assigned to the user's case anywhere in this structure. Tokens {{...}} resolve at Stage 5. For legal-firm sign-off package.",
+  "version": "2.0.0",
+  "jurisdiction": "NSW",
+  "spec_change": "CR-2-01: removed s6-multi-chain.outputs[n/a_esc_routed] (5th entry). chain_count >= 3 now routes purely through s6.escalation_overrides to SX using escalation_handoff (complexity variant). Band enum is strictly likely|possible|unclear|insufficient; engine must fail-closed on any other value.",
+  "builder": "Cursor + MiniMax M3 (Build stage)",
+  "build_date": "2026-06-13",
+  "global_escalation_triggers": [
+    { "id": "esc-injury", "condition": "any injury reported (minor or serious)", "note": "serious -> immediate, before any further slots; minor -> complete safety check then escalate" },
+    { "id": "esc-hitrun", "condition": "hit-and-run indicated" },
+    { "id": "esc-vulnerable", "condition": "pedestrian or cyclist involved" },
+    { "id": "esc-fraud", "condition": "fraud signals: story inconsistency, rego mismatch, third-party pressure" },
+    { "id": "esc-dispute", "condition": "customer explicitly disputes the AI's summary" },
+    { "id": "esc-multiparty", "condition": "3+ vehicles/parties" },
+    { "id": "esc-advice", "condition": "customer asks for legal advice directly", "note": "deflect with persona utterance category (e), then offer callback; do not answer" }
+  ],
+  "scenarios": [
+    {
+      "id": "s1-rear-end",
+      "name": "Rear-end collision",
+      "status": "CANONICAL_EXAMPLE_COMPLETE",
+      "rule_citations": [{ "rule": "r126", "title": "Keeping a safe distance behind vehicles" }],
+      "classification_questions": [
+        { "id": "s1-q1", "slot": "user_position", "question_voice": "Were you the vehicle in front, or the vehicle behind?", "question_web": "In the collision, your vehicle was:", "answer_type": "enum", "options": ["front", "behind", "middle_of_chain"], "validation": "must be one option", "reprompt_max": 2 },
+        { "id": "s1-q2", "slot": "user_motion", "question_voice": "Just before the impact, was your vehicle stopped or moving?", "question_web": "Just before impact, your vehicle was:", "answer_type": "enum", "options": ["stopped", "moving", "slowing"], "validation": "must be one option", "reprompt_max": 2 },
+        { "id": "s1-q3", "slot": "chain_count", "question_voice": "How many vehicles were involved altogether?", "question_web": "Total vehicles involved:", "answer_type": "integer", "validation": ">=2; if >=3 route to s6 and check esc-multiparty", "reprompt_max": 2 }
+      ],
+      "default_pattern": { "description": "Following driver usually responsible for maintaining safe gap (r126)", "favours": "front_vehicle" },
+      "exceptions": [
+        { "id": "s1-e1", "probe_question": "Did the vehicle in front brake suddenly without an apparent reason?", "slot": "sudden_braking", "effect": "downgrade_band" },
+        { "id": "s1-e2", "probe_question": "As far as you know, were the front vehicle's brake lights working?", "slot": "brake_lights", "effect": "downgrade_band" },
+        { "id": "s1-e3", "probe_question": "Did the vehicle in front reverse into you?", "slot": "front_reversed", "effect": "flag_unclear" },
+        { "id": "s1-e4", "probe_question": "Was this part of a chain collision — were you pushed into the vehicle ahead?", "slot": "chain_pushed", "effect": "flag_unclear" }
+      ],
+      "damage_consistency_check": { "expected": "rear damage on front vehicle AND front damage on rear vehicle", "on_mismatch": "band cannot exceed 'unclear'" },
+      "band_logic": [
+        { "when": "pattern matched AND no exceptions AND damage consistent", "band": "likely" },
+        { "when": "pattern matched AND >=1 exception unconfirmed or present", "band": "possible" },
+        { "when": "any flag_unclear exception OR damage inconsistent", "band": "unclear" },
+        { "when": "classification questions incomplete after reprompts", "band": "insufficient" }
+      ],
+      "outputs": [
+        { "band": "likely", "text_voice": "In most rear-end collisions in New South Wales, the driver of the following vehicle is considered responsible for keeping a safe gap. Based on what you've told me, your situation looks like a common example of that pattern — but whether it applies depends on the full evidence. {{ATTACH:master}}", "text_web": "In most rear-end collisions in NSW, the following driver is considered responsible for maintaining a safe following distance (Road Rule 126). Your description matches this common pattern. Whether it applies here depends on the full evidence. {{ATTACH:master}}" },
+        { "band": "possible", "text_voice": "Rear-end collisions in New South Wales usually involve the following driver's duty to keep a safe gap, but you've mentioned something that can change how these are assessed. A lawyer will need to look at the details. {{ATTACH:master}}", "text_web": "This matches the common rear-end pattern under NSW Road Rule 126, but one or more factors you've described (such as sudden braking or brake-light issues) can affect how these collisions are assessed. {{ATTACH:master}}" },
+        { "band": "unclear", "text_voice": "Based on what you've described, this doesn't fit the usual rear-end pattern neatly, so I won't guess. The details you've given me will go straight to a lawyer to review properly. {{ATTACH:master}}", "text_web": "Your description doesn't fit the standard rear-end pattern neatly — for example the damage locations or sequence of events raise questions. This is exactly the kind of situation a lawyer should review. {{ATTACH:master}}" },
+        { "band": "insufficient", "text_voice": "I don't have quite enough detail to tell you how collisions like this are usually understood. That's completely fine — a lawyer will go through it with you. {{ATTACH:master}}", "text_web": "There isn't enough information yet to match your accident to a common pattern. A lawyer will review what you've provided and follow up. {{ATTACH:master}}" }
+      ],
+      "escalation_overrides": [{ "condition": "chain_count >= 3", "action": "route_to_s6_then_esc-multiparty" }]
+    },
+
+    {
+      "id": "s2-giveway-t",
+      "name": "Give way / T-intersection",
+      "status": "BUILDER_COMPLETE",
+      "rule_citations": [
+        { "rule": "r72", "title": "Giving way at an intersection with a give way sign or line" },
+        { "rule": "r73", "title": "Giving way at a T-intersection" }
+      ],
+      "classification_questions": [
+        { "id": "s2-q1", "slot": "road_layout", "question_voice": "Was it a standard intersection with a give way sign or line, or a T-intersection — where one road ends into another?", "question_web": "The intersection was:", "answer_type": "enum", "options": ["give_way_sign_or_line", "t_intersection", "stop_sign", "unmarked"], "validation": "must be one option", "reprompt_max": 2 },
+        { "id": "s2-q2", "slot": "user_road_type", "question_voice": "Were you on the road that ended (the terminating road), or the through road?", "question_web": "Your vehicle was on:", "answer_type": "enum", "options": ["terminating_road", "through_road", "unsure"], "validation": "must be one option", "reprompt_max": 2 },
+        { "id": "s2-q3", "slot": "user_motion", "question_voice": "Just before the impact, were you moving, stopped, or slowing for the intersection?", "question_web": "Just before impact, your vehicle was:", "answer_type": "enum", "options": ["moving", "stopped", "slowing"], "validation": "must be one option", "reprompt_max": 2 },
+        { "id": "s2-q4", "slot": "other_vehicle_motion", "question_voice": "Was the other vehicle already on the through road, or just entering it as you did?", "question_web": "The other vehicle was:", "answer_type": "enum", "options": ["already_through", "entering_same_time", "unsure"], "validation": "must be one option", "reprompt_max": 2 }
+      ],
+      "default_pattern": { "description": "Driver on the terminating road must give way to traffic on the continuing road (r72, r73)", "favours": "through_road_vehicle" },
+      "exceptions": [
+        { "id": "s2-e1", "probe_question": "Was your view of the through road obstructed — by a fence, parked cars, vegetation, or weather?", "slot": "obstructed_sight", "effect": "downgrade_band" },
+        { "id": "s2-e2", "probe_question": "Did both vehicles appear to enter the intersection at the same moment?", "slot": "simultaneous_entry", "effect": "downgrade_band" },
+        { "id": "s2-e3", "probe_question": "Were the give way or stop signs missing, faded, or obscured?", "slot": "signage_defective", "effect": "downgrade_band" },
+        { "id": "s2-e4", "probe_question": "Were traffic lights operating and overriding the give way sign?", "slot": "traffic_lights_override", "effect": "flag_unclear" },
+        { "id": "s2-e5", "probe_question": "Was the other vehicle travelling well above the speed limit?", "slot": "other_speeding", "effect": "downgrade_band" }
+      ],
+      "damage_consistency_check": { "expected": "front damage on terminating-road vehicle AND side damage on through-road vehicle (nearside impact)", "on_mismatch": "band cannot exceed 'unclear'" },
+      "band_logic": [
+        { "when": "user on terminating road AND no exceptions AND damage consistent", "band": "likely" },
+        { "when": "user on through road AND no exceptions AND damage consistent", "band": "likely" },
+        { "when": "user on terminating road AND >=1 exception present (sight, signage, simultaneous) AND damage consistent", "band": "possible" },
+        { "when": "traffic lights override OR simultaneous entry AND damage inconsistent", "band": "unclear" },
+        { "when": "classification questions incomplete after reprompts", "band": "insufficient" }
+      ],
+      "outputs": [
+        { "band": "likely", "text_voice": "At intersections with a give way sign or line, and at T-intersections in New South Wales, the driver on the road that ends generally has to give way to traffic on the continuing road. Based on what you've described, your situation looks like a common example of that rule — though a lawyer will still need to check the details. {{ATTACH:master}}", "text_web": "Under NSW Road Rules 72 and 73, drivers entering from a terminating road (including most T-intersections) must give way to vehicles on the continuing road. Your description matches this common pattern. Whether it applies to your case depends on the full evidence. {{ATTACH:master}}" },
+        { "band": "possible", "text_voice": "Give way rules usually put the duty on the driver joining from the terminating road, but you've described something that can change how it's assessed — like an obstructed view, faded signage, or both vehicles arriving at the same time. A lawyer will look at how that affects things. {{ATTACH:master}}", "text_web": "The standard rule under NSW Road Rules 72-73 places the give way duty on the driver on the terminating road. However, factors you've described (such as obstructed sight lines, defective signage, or simultaneous entry) can affect how this is assessed. {{ATTACH:master}}" },
+        { "band": "unclear", "text_voice": "There are too many complicating factors here for me to say which way this usually goes — for example the traffic lights may have been overriding the signs, or the damage doesn't match a single give way scenario. A lawyer will go through it properly. {{ATTACH:master}}", "text_web": "Your description raises questions that don't fit a single give way pattern neatly — for example possible traffic-light override or a damage profile that doesn't match the reported sequence. A lawyer will need to review the full picture. {{ATTACH:master}}" },
+        { "band": "insufficient", "text_voice": "I don't have quite enough detail about the intersection layout and what each driver was doing to match this to a common pattern. A lawyer will pick it up from here. {{ATTACH:master}}", "text_web": "There isn't enough information yet to match your accident to a common give way pattern. A lawyer will review what you've provided and follow up. {{ATTACH:master}}" }
+      ],
+      "escalation_overrides": [
+        { "condition": "user_road_type = unsure AND other_vehicle_motion = unsure", "action": "treat_as_complex_route_to_lawyer" }
+      ]
+    },
+
+    {
+      "id": "s3-roundabout",
+      "name": "Roundabout",
+      "status": "BUILDER_COMPLETE",
+      "rule_citations": [{ "rule": "r114", "title": "Giving way when entering or driving in a roundabout" }],
+      "classification_questions": [
+        { "id": "s3-q1", "slot": "collision_location", "question_voice": "Where in the roundabout did the contact happen — on entry, while circulating, or on exit?", "question_web": "The contact happened:", "answer_type": "enum", "options": ["on_entry", "while_circulating", "on_exit"], "validation": "must be one option", "reprompt_max": 2 },
+        { "id": "s3-q2", "slot": "user_indicating", "question_voice": "Did you indicate before you entered? And did you indicate left before your exit?", "question_web": "Your vehicle's indicators:", "answer_type": "enum", "options": ["indicated_left_exit", "indicated_only_entry", "no_indication", "unsure"], "validation": "must be one option", "reprompt_max": 2 },
+        { "id": "s3-q3", "slot": "other_indicating", "question_voice": "Did the other vehicle indicate at all?", "question_web": "The other vehicle's indicators:", "answer_type": "enum", "options": ["indicated", "no_indication", "unsure"], "validation": "must be one option", "reprompt_max": 2 },
+        { "id": "s3-q4", "slot": "lane_count", "question_voice": "Was the roundabout a single lane all the way around, or did it have more than one lane where the contact happened?", "question_web": "At the point of contact, the roundabout was:", "answer_type": "enum", "options": ["single_lane", "multi_lane", "unsure"], "validation": "must be one option", "reprompt_max": 2 }
+      ],
+      "default_pattern": { "description": "Entering driver gives way to traffic already in the roundabout (r114)", "favours": "circulating_vehicle" },
+      "exceptions": [
+        { "id": "s3-e1", "probe_question": "Did the other vehicle fail to indicate before changing lanes or exiting?", "slot": "other_failed_indicate", "effect": "downgrade_band" },
+        { "id": "s3-e2", "probe_question": "Did both vehicles appear to enter at roughly the same time?", "slot": "simultaneous_entry", "effect": "downgrade_band" },
+        { "id": "s3-e3", "probe_question": "Was this a multi-lane roundabout where neither driver could safely have stayed in lane?", "slot": "multi_lane_conflict", "effect": "flag_unclear" },
+        { "id": "s3-e4", "probe_question": "Did the other vehicle stop in the roundabout for no apparent reason?", "slot": "other_stopped_in_roundabout", "effect": "downgrade_band" }
+      ],
+      "damage_consistency_check": { "expected": "front of entering vehicle AND side of circulating vehicle (entry) OR side of both vehicles (lane-change in circulating)", "on_mismatch": "band cannot exceed 'unclear'" },
+      "band_logic": [
+        { "when": "contact on entry AND user entering AND no exceptions AND damage consistent", "band": "likely" },
+        { "when": "contact on entry AND >=1 exception present AND damage consistent", "band": "possible" },
+        { "when": "contact while circulating or on exit AND failure to indicate (either party) AND damage consistent", "band": "possible" },
+        { "when": "multi_lane conflict OR simultaneous entry OR damage inconsistent", "band": "unclear" },
+        { "when": "classification questions incomplete after reprompts", "band": "insufficient" }
+      ],
+      "outputs": [
+        { "band": "likely", "text_voice": "At a roundabout in New South Wales, the driver entering must give way to vehicles already in the roundabout. Based on what you've described, your situation looks like a common example of that rule — a lawyer will still need to confirm the details. {{ATTACH:master}}", "text_web": "Under NSW Road Rule 114, a driver entering a roundabout must give way to any vehicle already in the roundabout. Your description matches this common pattern. Whether it applies to your case depends on the full evidence. {{ATTACH:master}}" },
+        { "band": "possible", "text_voice": "Roundabout collisions in New South Wales usually turn on who had the give way duty at the moment of impact, but you've described something — like a missing indicator or both vehicles arriving together — that can change how this is assessed. A lawyer will look at how that affects things. {{ATTACH:master}}", "text_web": "The standard rule under NSW Road Rule 114 places the give way duty on the entering vehicle. However, factors you've described (such as a failure to indicate, simultaneous entry, or unusual stopping) can affect how this is assessed. {{ATTACH:master}}" },
+        { "band": "unclear", "text_voice": "Roundabout collisions are often more complex than they look, and what you've described doesn't fit a single pattern neatly. A lawyer will need to go through the indicators, lanes, and timing with you. {{ATTACH:master}}", "text_web": "Your description raises questions that don't fit a single roundabout pattern — for example a multi-lane conflict or a damage profile that doesn't match the reported sequence. A lawyer will need to review the full picture. {{ATTACH:master}}" },
+        { "band": "insufficient", "text_voice": "I don't have enough detail about where in the roundabout the contact happened and what each driver was signalling to match this to a common pattern. A lawyer will pick it up from here. {{ATTACH:master}}", "text_web": "There isn't enough information yet to match your accident to a common roundabout pattern. A lawyer will review what you've provided and follow up. {{ATTACH:master}}" }
+      ],
+      "escalation_overrides": [
+        { "condition": "lane_count = multi_lane AND collision_location = while_circulating", "action": "treat_as_complex_route_to_lawyer" }
+      ]
+    },
+
+    {
+      "id": "s4-lane-merge",
+      "name": "Lane change / merge",
+      "status": "BUILDER_COMPLETE",
+      "rule_citations": [
+        { "rule": "r148", "title": "Giving way when moving between marked lanes" },
+        { "rule": "r149", "title": "Giving way when lines of traffic merge (zip merge)" }
+      ],
+      "classification_questions": [
+        { "id": "s4-q1", "slot": "merge_type", "question_voice": "Was this a marked lane change across a broken or solid line, or a zip merge where two lanes narrow into one?", "question_web": "The situation was:", "answer_type": "enum", "options": ["lane_change_marked", "zip_merge", "unsure"], "validation": "must be one option", "reprompt_max": 2 },
+        { "id": "s4-q2", "slot": "user_indicating", "question_voice": "Did you indicate before changing lanes or merging?", "question_web": "Your vehicle's indicator:", "answer_type": "enum", "options": ["indicated", "no_indication", "unsure"], "validation": "must be one option", "reprompt_max": 2 },
+        { "id": "s4-q3", "slot": "other_indicating", "question_voice": "Did the other vehicle indicate?", "question_web": "The other vehicle's indicator:", "answer_type": "enum", "options": ["indicated", "no_indication", "unsure"], "validation": "must be one option", "reprompt_max": 2 },
+        { "id": "s4-q4", "slot": "user_position_relative", "question_voice": "Were you changing into the other vehicle's lane, or was the other vehicle changing into yours?", "question_web": "Your vehicle was:", "answer_type": "enum", "options": ["changing_into_their_lane", "they_changing_into_yours", "both_changing", "unsure"], "validation": "must be one option", "reprompt_max": 2 }
+      ],
+      "default_pattern": { "description": "Driver crossing marked lines gives way to traffic already in the destination lane (r148); in a zip merge, the vehicle ahead has priority (r149)", "favours": "vehicle_already_in_lane" },
+      "exceptions": [
+        { "id": "s4-e1", "probe_question": "Did the other vehicle move into your lane from a standing start or very slowly, without indicating?", "slot": "other_unannounced_move", "effect": "downgrade_band" },
+        { "id": "s4-e2", "probe_question": "Did both vehicles appear to change lanes at the same moment?", "slot": "simultaneous_change", "effect": "downgrade_band" },
+        { "id": "s4-e3", "probe_question": "Was the lane marking a solid line rather than a broken one when the change began?", "slot": "solid_line_crossed", "effect": "downgrade_band" },
+        { "id": "s4-e4", "probe_question": "Was it a true zip merge (lanes narrowing), or two separate marked lanes side by side?", "slot": "merge_layout_dispute", "effect": "flag_unclear" }
+      ],
+      "damage_consistency_check": { "expected": "side damage on user vehicle AND side damage on other vehicle (sideswipe) OR front of merging vehicle AND side of continuing vehicle", "on_mismatch": "band cannot exceed 'unclear'" },
+      "band_logic": [
+        { "when": "user changing into other lane AND no exceptions AND damage consistent", "band": "likely" },
+        { "when": "zip merge AND user behind AND no exceptions AND damage consistent", "band": "likely" },
+        { "when": "user changing into other lane AND >=1 exception present (indication, simultaneous, solid line) AND damage consistent", "band": "possible" },
+        { "when": "other vehicle's unannounced move AND user established in lane", "band": "possible" },
+        { "when": "simultaneous change OR layout dispute OR damage inconsistent", "band": "unclear" },
+        { "when": "classification questions incomplete after reprompts", "band": "insufficient" }
+      ],
+      "outputs": [
+        { "band": "likely", "text_voice": "In New South Wales, the driver changing lanes or merging has to give way to vehicles already in the lane they're moving into. In a zip merge, the vehicle ahead has the priority. Based on what you've described, your situation looks like a common example of that rule — a lawyer will still need to check the details. {{ATTACH:master}}", "text_web": "Under NSW Road Rules 148 and 149, a driver changing lanes or merging must give way to vehicles already in the destination lane. In a zip merge, the vehicle ahead has priority. Your description matches this common pattern. Whether it applies to your case depends on the full evidence. {{ATTACH:master}}" },
+        { "band": "possible", "text_voice": "Lane change and merge collisions usually turn on who had the duty to give way, but you've described something — like a missing indicator or both vehicles moving at once — that can change how this is assessed. A lawyer will look at how that affects things. {{ATTACH:master}}", "text_web": "The standard rules under NSW Road Rules 148-149 place the give way duty on the driver changing lanes or merging. However, factors you've described (such as a failure to indicate, simultaneous lane change, or a solid line) can affect how this is assessed. {{ATTACH:master}}" },
+        { "band": "unclear", "text_voice": "Lane change and merge collisions often turn on layout and timing, and what you've described doesn't fit a single pattern neatly. A lawyer will go through it with you. {{ATTACH:master}}", "text_web": "Your description raises questions that don't fit a single lane change or merge pattern — for example a dispute about whether it was a true zip merge, or a damage profile that doesn't match the reported sequence. A lawyer will need to review the full picture. {{ATTACH:master}}" },
+        { "band": "insufficient", "text_voice": "I don't have enough detail about which lane was which, who was indicating, and where each vehicle was to match this to a common pattern. A lawyer will pick it up from here. {{ATTACH:master}}", "text_web": "There isn't enough information yet to match your accident to a common lane change or merge pattern. A lawyer will review what you've provided and follow up. {{ATTACH:master}}" }
+      ],
+      "escalation_overrides": [
+        { "condition": "user_position_relative = unsure", "action": "treat_as_complex_route_to_lawyer" }
+      ]
+    },
+
+    {
+      "id": "s5-reversing",
+      "name": "Reversing",
+      "status": "BUILDER_COMPLETE",
+      "rule_citations": [{ "rule": "r296", "title": "Reversing — driver must not reverse unless safe" }],
+      "classification_questions": [
+        { "id": "s5-q1", "slot": "user_motion", "question_voice": "Were you reversing, or was the other vehicle reversing at the time of impact?", "question_web": "At the moment of impact, which vehicle was reversing:", "answer_type": "enum", "options": ["i_was_reversing", "they_were_reversing", "both_reversing", "unsure"], "validation": "must be one option", "reprompt_max": 2 },
+        { "id": "s5-q2", "slot": "location_type", "question_voice": "Where did this happen — a car park, a driveway, a street, or somewhere else?", "question_web": "The location was:", "answer_type": "enum", "options": ["car_park", "driveway", "street", "private_property", "other"], "validation": "must be one option", "reprompt_max": 2 },
+        { "id": "s5-q3", "slot": "user_visibility", "question_voice": "As far as you know, did you have a clear view out the back — no obstructions, no small children or pedestrians around?", "question_web": "Your view to the rear was:", "answer_type": "enum", "options": ["clear", "partially_obstructed", "very_obstructed", "unsure"], "validation": "must be one option", "reprompt_max": 2 },
+        { "id": "s5-q4", "slot": "other_vehicle_state", "question_voice": "Was the other vehicle parked and stationary, or moving at the time?", "question_web": "The other vehicle was:", "answer_type": "enum", "options": ["parked_stationary", "moving", "also_reversing", "unsure"], "validation": "must be one option", "reprompt_max": 2 }
+      ],
+      "default_pattern": { "description": "Driver reversing must ensure the path is clear (r296)", "favours": "vehicle_not_reversing" },
+      "exceptions": [
+        { "id": "s5-e1", "probe_question": "Did the other vehicle roll forward, reverse, or pull out from a stationary position with no warning?", "slot": "other_unannounced_move", "effect": "downgrade_band" },
+        { "id": "s5-e2", "probe_question": "Was your view obstructed by another parked vehicle, a wall, a pillar, or a sign?", "slot": "view_obstruction", "effect": "downgrade_band" },
+        { "id": "s5-e3", "probe_question": "Did the other vehicle appear to be double-parked, stopped in a no-stopping zone, or otherwise illegally positioned?", "slot": "other_illegal_position", "effect": "downgrade_band" },
+        { "id": "s5-e4", "probe_question": "Was the impact at very low speed, with both vehicles moving only slightly?", "slot": "low_speed_both_moving", "effect": "flag_unclear" }
+      ],
+      "damage_consistency_check": { "expected": "rear damage on reversing vehicle AND front damage on stationary/approaching vehicle (or both rear damage if both reversing)", "on_mismatch": "band cannot exceed 'unclear'" },
+      "band_logic": [
+        { "when": "user reversing AND no exceptions AND damage consistent", "band": "likely" },
+        { "when": "user reversing AND >=1 exception present (obstruction, other unannounced move, low speed) AND damage consistent", "band": "possible" },
+        { "when": "other vehicle reversing AND user stationary/legitimately positioned AND damage consistent", "band": "likely" },
+        { "when": "both reversing OR low speed both moving OR damage inconsistent", "band": "unclear" },
+        { "when": "classification questions incomplete after reprompts", "band": "insufficient" }
+      ],
+      "outputs": [
+        { "band": "likely", "text_voice": "Under NSW road rules, a driver reversing must make sure the path is clear before they move. Based on what you've described, your situation looks like a common example of that rule — a lawyer will still need to check the details. {{ATTACH:master}}", "text_web": "Under NSW Road Rule 296, a driver must not reverse their vehicle unless the path is clear. Your description matches this common pattern. Whether it applies to your case depends on the full evidence. {{ATTACH:master}}" },
+        { "band": "possible", "text_voice": "Reversing collisions usually turn on whether the reversing driver had a clear view and a clear path, but you've described something — like an obstruction or the other vehicle moving unexpectedly — that can change how this is assessed. A lawyer will look at how that affects things. {{ATTACH:master}}", "text_web": "The standard rule under NSW Road Rule 296 places the duty on the reversing driver to keep the path clear. However, factors you've described (such as an obstructed view, an unexpected movement by the other vehicle, or an illegally parked position) can affect how this is assessed. {{ATTACH:master}}" },
+        { "band": "unclear", "text_voice": "Reversing collisions are often genuinely shared situations, and what you've described doesn't fit a single pattern neatly. A lawyer will go through it with you. {{ATTACH:master}}", "text_web": "Your description raises questions that don't fit a single reversing pattern — for example both vehicles moving at low speed, or a damage profile that doesn't match the reported sequence. A lawyer will need to review the full picture. {{ATTACH:master}}" },
+        { "band": "insufficient", "text_voice": "I don't have enough detail about who was reversing, where, and what each driver could see to match this to a common pattern. A lawyer will pick it up from here. {{ATTACH:master}}", "text_web": "There isn't enough information yet to match your accident to a common reversing pattern. A lawyer will review what you've provided and follow up. {{ATTACH:master}}" }
+      ],
+      "escalation_overrides": [
+        { "condition": "user_motion = unsure", "action": "treat_as_complex_route_to_lawyer" }
+      ]
+    },
+
+    {
+      "id": "s6-multi-chain",
+      "name": "Multi-vehicle / chain",
+      "status": "BUILDER_COMPLETE",
+      "rule_citations": [{ "rule": "r126", "title": "Keeping a safe distance behind vehicles" }],
+      "classification_questions": [
+        { "id": "s6-q1", "slot": "chain_count", "question_voice": "How many vehicles were involved in total?", "question_web": "Total vehicles involved:", "answer_type": "integer", "validation": ">=3 routes to esc-multiparty automatically", "reprompt_max": 2 },
+        { "id": "s6-q2", "slot": "user_position", "question_voice": "Where was your vehicle in the chain — front, middle, or back?", "question_web": "Your vehicle's position in the chain:", "answer_type": "enum", "options": ["front", "middle", "back", "side_swiped"], "validation": "must be one option", "reprompt_max": 2 },
+        { "id": "s6-q3", "slot": "user_motion", "question_voice": "Just before the first impact to your vehicle, were you moving, stopped, or being pushed?", "question_web": "Just before the first impact to your vehicle, you were:", "answer_type": "enum", "options": ["moving", "stopped", "being_pushed", "slowing"], "validation": "must be one option", "reprompt_max": 2 },
+        { "id": "s6-q4", "slot": "chain_mechanism", "question_voice": "Did the chain start with one vehicle hitting another, and that vehicle then hitting you — or were you hit from behind and pushed forward?", "question_web": "The chain started with:", "answer_type": "enum", "options": ["rear_hit_front", "i_was_pushed_forward", "side_impact_to_chain", "unsure"], "validation": "must be one option", "reprompt_max": 2 }
+      ],
+      "default_pattern": { "description": "Each driver's compliance with the standard duty of care is assessed; in multi-vehicle collisions, fault is often apportioned between the parties depending on the evidence", "favours": "context_dependent" },
+      "exceptions": [
+        { "id": "s6-e1", "probe_question": "Did the first vehicle in the chain stop for an unrelated reason (medical, mechanical) without warning?", "slot": "first_vehicle_emergency_stop", "effect": "downgrade_band" },
+        { "id": "s6-e2", "probe_question": "Was any driver in the chain travelling well above the speed limit?", "slot": "chain_speeding", "effect": "downgrade_band" },
+        { "id": "s6-e3", "probe_question": "Was any vehicle following so closely that a lawyer would describe it as tailgating?", "slot": "tailgating_observed", "effect": "downgrade_band" },
+        { "id": "s6-e4", "probe_question": "Did the chain involve a heavy vehicle, motorcycle, or pedestrian?", "slot": "vulnerable_or_heavy_party", "effect": "flag_unclear" }
+      ],
+      "damage_consistency_check": { "expected": "damage profile consistent with reported chain mechanism (rear+front damage in push chain, distributed damage in side-impact chain)", "on_mismatch": "band cannot exceed 'unclear'" },
+      "band_logic": [
+        { "when": "user clearly rear-ended by another AND user stopped AND no exceptions", "band": "possible" },
+        { "when": "user middle of chain AND pushed forward AND no exceptions", "band": "unclear" },
+        { "when": ">=1 exception present OR chain mechanism unclear OR damage inconsistent", "band": "unclear" },
+        { "when": "chain_count >= 3 routes to esc-multiparty before band logic", "band": "n/a_esc_routed" },
+        { "when": "classification questions incomplete after reprompts", "band": "insufficient" }
+      ],
+      "outputs": [
+        { "band": "likely", "text_voice": "In New South Wales, the standard duty of care still applies in multi-vehicle collisions, and a clear pattern of one driver failing to keep a safe gap can point to responsibility. Based on what you've described, your situation looks like a common example of that pattern — a lawyer will need to confirm the details. {{ATTACH:master}}", "text_web": "Under NSW road rules (including Road Rule 126 on safe following distance), each driver in a multi-vehicle collision owes a standard duty of care. Where one driver clearly failed to keep a safe gap, that pattern often points to responsibility. Whether it applies to your case depends on the full evidence. {{ATTACH:master}}" },
+        { "band": "possible", "text_voice": "Multi-vehicle collisions in New South Wales are usually assessed by looking at each driver's conduct in turn, and how responsibility is divided often depends on the evidence. You've described something that affects that picture, and a lawyer will go through it. {{ATTACH:master}}", "text_web": "Multi-vehicle collisions in NSW are usually assessed by looking at each driver's conduct, and how responsibility is divided between the parties often depends on the evidence. Factors you've described (such as following too closely or speeding) can affect that picture. {{ATTACH:master}}" },
+        { "band": "unclear", "text_voice": "Multi-vehicle and chain collisions are often genuinely complex — what each driver could and should have done depends on details that are hard to pin down from one account. A lawyer will go through the full picture with you. {{ATTACH:master}}", "text_web": "Multi-vehicle and chain collisions are often genuinely complex. Your description raises questions that don't fit a single pattern — for example unclear sequence, mixed damage profile, or vulnerable or heavy vehicles in the chain. A lawyer will need to review the full picture. {{ATTACH:master}}" },
+        { "band": "insufficient", "text_voice": "I don't have enough detail about who hit whom, in what order, and where your vehicle sat in the chain to match this to a common pattern. A lawyer will pick it up from here. {{ATTACH:master}}", "text_web": "There isn't enough information yet to match your accident to a common multi-vehicle pattern. A lawyer will review what you've provided and follow up. {{ATTACH:master}}" }
+      ],
+      "escalation_overrides": [
+        { "condition": "chain_count >= 3", "action": "esc-multiparty_fired_immediately" }
+      ]
+    }
+  ],
+  "references_for_legal_verification": {
+    "note": "Cited in source Loop Request; UNVERIFIED. Listed in rule-tree-review.md for the legal firm to confirm or strike. Never customer-facing.",
+    "cases": ["Solomon v NRMA 2026 (multi-vehicle split)", "PXAYL v NRMA 2025 (merge — vehicle already in lane)"]
+  }
+}

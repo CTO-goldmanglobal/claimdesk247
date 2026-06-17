@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Intake — question {{ slot_index }}{% endblock %}
+{% block content %}
+<h1>Tell us what happened</h1>
+<div class="progress">Question {{ slot_index }} of {{ slots|length }}</div>
+<div class="chat">
+  <div class="label">Alex (AI assistant)</div>
+  {% if current_slot.id == 1 %}
+    <p>Which state did the accident happen in?</p>
+  {% elif current_slot.id == 2 %}
+    <p>About what date and time did it happen, and roughly where — suburb or intersection?</p>
+  {% elif current_slot.id == 3 %}
+    <p>How would you describe what happened?</p>
+  {% elif current_slot.id == 4 %}
+    <p>Tell me about your car — make, model, colour, and rego?</p>
+  {% elif current_slot.id == 5 %}
+    <p>And the other car — same details if you have them, or 'unknown'.</p>
+  {% elif current_slot.id == 6 %}
+    <p>In the moments before the impact, was your car stopped, moving, or slowing? And which direction was each of you heading?</p>
+  {% elif current_slot.id == 7 %}
+    <p>Where is the damage on your car?</p>
+  {% elif current_slot.id == 8 %}
+    <p>Were there any traffic controls at the spot — lights, a give way sign, a stop sign, a roundabout, or none?</p>
+  {% elif current_slot.id == 9 %}
+    <p>Did the police attend?</p>
+  {% elif current_slot.id == 14 %}
+    <p>Just to double-check — is anyone hurt, even a little?</p>
+  {% else %}
+    <p>Please provide the following detail.</p>
+  {% endif %}
+</div>
+<form method="post" action="/intake">
+  <input type="hidden" name="slot_id" value="{{ current_slot.id }}">
+  {% if current_slot.type == "enum" %}
+    <label>{{ current_slot.slot }}
+      <select name="value" required>
+        <option value="">Please choose</option>
+        {% for opt in current_slot.options %}
+          <option value="{{ opt }}">{{ opt }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  {% elif current_slot.type == "multienum" %}
+    <label>{{ current_slot.slot }} <small>(comma-separated)</small>
+      <input type="text" name="value" placeholder="{{ current_slot.options|join(', ') }}">
+    </label>
+  {% else %}
+    <label>{{ current_slot.slot }}
+      <input type="text" name="value" required>
+    </label>
+  {% endif %}
+  <p><button type="submit">Continue</button></p>
+</form>
+{% endblock %}

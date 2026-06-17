@@ -1,0 +1,70 @@
+{
+  "$comment": "Fables Stage 1 binding spec. Builders complete scenarios 2-6 to the depth of scenario 1 (canonical example). Output file: deliverables/rule-tree.nsw.v1.complete.json. No numeric fault percentage may be assigned to the user's case anywhere in this structure.",
+  "version": "1.0.0",
+  "jurisdiction": "NSW",
+  "schema": {
+    "scenario": {
+      "required": ["id", "name", "rule_citations", "classification_questions", "default_pattern", "exceptions", "damage_consistency_check", "band_logic", "outputs", "escalation_overrides"],
+      "field_notes": {
+        "rule_citations": "Array of { rule: 'r126', title: string }. Use corrected numbers: r126, r72, r73, r114, r148, r149, r296. r71 and r298 are PROHIBITED (wrong citations in source doc).",
+        "classification_questions": "Ordered array of { id, slot, question_voice, question_web, answer_type, options?, validation, reprompt_max: 2 }",
+        "exceptions": "Array of { id, probe_question, slot, effect: 'downgrade_band' | 'flag_unclear' | 'escalate' }",
+        "band_logic": "Deterministic mapping from (pattern_match, exceptions_present[], damage_consistent) to one of: likely | possible | unclear | insufficient. No other values permitted. No numeric field exists in this schema by design — do not add one.",
+        "outputs": "One entry per band: { band, text_voice, text_web }. Every text must end by attaching disclaimer key 'master' (reference, not inline copy). Text must obey framing_rules in disclaimers spec.",
+        "escalation_overrides": "Conditions within this scenario that bypass band output entirely and route to human (in addition to the 7 global triggers)."
+      }
+    }
+  },
+  "global_escalation_triggers": [
+    { "id": "esc-injury", "condition": "any injury reported (minor or serious)", "note": "serious -> immediate, before any further slots; minor -> complete safety check then escalate" },
+    { "id": "esc-hitrun", "condition": "hit-and-run indicated" },
+    { "id": "esc-vulnerable", "condition": "pedestrian or cyclist involved" },
+    { "id": "esc-fraud", "condition": "fraud signals: story inconsistency, rego mismatch, third-party pressure" },
+    { "id": "esc-dispute", "condition": "customer explicitly disputes the AI's summary" },
+    { "id": "esc-multiparty", "condition": "3+ vehicles/parties" },
+    { "id": "esc-advice", "condition": "customer asks for legal advice directly", "note": "deflect with persona utterance category (e), then offer callback; do not answer" }
+  ],
+  "scenarios": [
+    {
+      "id": "s1-rear-end",
+      "name": "Rear-end collision",
+      "status": "CANONICAL_EXAMPLE_COMPLETE",
+      "rule_citations": [{ "rule": "r126", "title": "Keeping a safe distance behind vehicles" }],
+      "classification_questions": [
+        { "id": "s1-q1", "slot": "user_position", "question_voice": "Were you the vehicle in front, or the vehicle behind?", "question_web": "In the collision, your vehicle was:", "answer_type": "enum", "options": ["front", "behind", "middle_of_chain"], "validation": "must be one option", "reprompt_max": 2 },
+        { "id": "s1-q2", "slot": "user_motion", "question_voice": "Just before the impact, was your vehicle stopped or moving?", "question_web": "Just before impact, your vehicle was:", "answer_type": "enum", "options": ["stopped", "moving", "slowing"], "validation": "must be one option", "reprompt_max": 2 },
+        { "id": "s1-q3", "slot": "chain_count", "question_voice": "How many vehicles were involved altogether?", "question_web": "Total vehicles involved:", "answer_type": "integer", "validation": ">=2; if >=3 route to s6 and check esc-multiparty", "reprompt_max": 2 }
+      ],
+      "default_pattern": { "description": "Following driver usually responsible for maintaining safe gap (r126)", "favours": "front_vehicle" },
+      "exceptions": [
+        { "id": "s1-e1", "probe_question": "Did the vehicle in front brake suddenly without an apparent reason?", "slot": "sudden_braking", "effect": "downgrade_band" },
+        { "id": "s1-e2", "probe_question": "As far as you know, were the front vehicle's brake lights working?", "slot": "brake_lights", "effect": "downgrade_band" },
+        { "id": "s1-e3", "probe_question": "Did the vehicle in front reverse into you?", "slot": "front_reversed", "effect": "flag_unclear" },
+        { "id": "s1-e4", "probe_question": "Was this part of a chain collision — were you pushed into the vehicle ahead?", "slot": "chain_pushed", "effect": "flag_unclear" }
+      ],
+      "damage_consistency_check": { "expected": "rear damage on front vehicle AND front damage on rear vehicle", "on_mismatch": "band cannot exceed 'unclear'" },
+      "band_logic": [
+        { "when": "pattern matched AND no exceptions AND damage consistent", "band": "likely" },
+        { "when": "pattern matched AND >=1 exception unconfirmed or present", "band": "possible" },
+        { "when": "any flag_unclear exception OR damage inconsistent", "band": "unclear" },
+        { "when": "classification questions incomplete after reprompts", "band": "insufficient" }
+      ],
+      "outputs": [
+        { "band": "likely", "text_voice": "In most rear-end collisions in New South Wales, the driver of the following vehicle is considered responsible for keeping a safe gap. Based on what you've told me, your situation looks like a common example of that pattern — but whether it applies depends on the full evidence. {{ATTACH:master}}", "text_web": "In most rear-end collisions in NSW, the following driver is considered responsible for maintaining a safe following distance (Road Rule 126). Your description matches this common pattern. Whether it applies here depends on the full evidence. {{ATTACH:master}}" },
+        { "band": "possible", "text_voice": "Rear-end collisions in New South Wales usually involve the following driver's duty to keep a safe gap, but you've mentioned something that can change how these are assessed. A lawyer will need to look at the details. {{ATTACH:master}}", "text_web": "This matches the common rear-end pattern under NSW Road Rule 126, but one or more factors you've described (such as sudden braking or brake-light issues) can affect how these collisions are assessed. {{ATTACH:master}}" },
+        { "band": "unclear", "text_voice": "Based on what you've described, this doesn't fit the usual rear-end pattern neatly, so I won't guess. The details you've given me will go straight to a lawyer to review properly. {{ATTACH:master}}", "text_web": "Your description doesn't fit the standard rear-end pattern neatly — for example the damage locations or sequence of events raise questions. This is exactly the kind of situation a lawyer should review. {{ATTACH:master}}" },
+        { "band": "insufficient", "text_voice": "I don't have quite enough detail to tell you how collisions like this are usually understood. That's completely fine — a lawyer will go through it with you. {{ATTACH:master}}", "text_web": "There isn't enough information yet to match your accident to a common pattern. A lawyer will review what you've provided and follow up. {{ATTACH:master}}" }
+      ],
+      "escalation_overrides": [{ "condition": "chain_count >= 3", "action": "route_to_s6_then_esc-multiparty" }]
+    },
+    { "id": "s2-giveway-t", "name": "Give way / T-intersection", "status": "BUILDER_TO_COMPLETE", "rule_citations": [{ "rule": "r72", "title": "Giving way at an intersection with a give way sign or line" }, { "rule": "r73", "title": "Giving way at a T-intersection" }], "seed": { "default_pattern": "driver on terminating road gives way", "exceptions": ["disputed sight lines", "simultaneous entry", "traffic controls override"], "seed_output": "NSW rules generally require the driver joining from a terminating road to give way. This may not apply if visibility was obscured or both vehicles entered at the same moment." } },
+    { "id": "s3-roundabout", "name": "Roundabout", "status": "BUILDER_TO_COMPLETE", "rule_citations": [{ "rule": "r114", "title": "Giving way when entering or driving in a roundabout" }], "seed": { "default_pattern": "entering driver gives way to circulating traffic", "exceptions": ["multi-lane exit conflicts", "exiting vehicle failed to indicate"], "seed_output": "At a roundabout in NSW, vehicles entering must give way to vehicles already in the roundabout. Multi-lane roundabout conflicts can be more complex." } },
+    { "id": "s4-lane-merge", "name": "Lane change / merge", "status": "BUILDER_TO_COMPLETE", "rule_citations": [{ "rule": "r148", "title": "Giving way when moving between marked lanes" }, { "rule": "r149", "title": "Giving way when lines of traffic merge (zip merge)" }], "seed": { "default_pattern": "driver crossing marked lines gives way; zip merge: vehicle ahead has priority", "exceptions": ["zip merge vs marked-lane dispute", "simultaneous lane change"], "seed_output": "Changing lanes requires giving way to vehicles already in the destination lane. In a zip merge, the vehicle ahead has priority — this is a common source of dispute." } },
+    { "id": "s5-reversing", "name": "Reversing", "status": "BUILDER_TO_COMPLETE", "rule_citations": [{ "rule": "r296", "title": "Reversing — driver must not reverse unless safe" }], "seed": { "default_pattern": "reversing driver must ensure path is clear", "exceptions": ["other vehicle moving illegally", "stationary vehicle struck in car park"], "seed_output": "A driver reversing must ensure the path is clear. Car park collisions are a frequent exception where fault is genuinely shared." } },
+    { "id": "s6-multi-chain", "name": "Multi-vehicle / chain", "status": "BUILDER_TO_COMPLETE", "rule_citations": [{ "rule": "r126", "title": "Keeping a safe distance behind vehicles" }], "seed": { "default_pattern": "compare each driver's departure from standard care; outcomes often split between parties", "exceptions": ["always check esc-multiparty (3+ parties -> escalate)"], "seed_output": "Multi-vehicle collisions in NSW are often split between the parties involved, depending on the evidence. A lawyer will assess how that applies to your situation.", "note": "Seed output rewritten from source doc: the original quoted 60/40, 70/30, 100% figures. General split outcomes may be described qualitatively only — never quote percentages to the user about their case, and avoid numeric examples in customer-facing text." } }
+  ],
+  "references_for_legal_verification": {
+    "note": "Cited in source Loop Request; UNVERIFIED. Include in rule-tree-review.md for the legal firm to confirm or strike. Never customer-facing.",
+    "cases": ["Solomon v NRMA 2026 (multi-vehicle split)", "PXAYL v NRMA 2025 (merge — vehicle already in lane)"]
+  }
+}

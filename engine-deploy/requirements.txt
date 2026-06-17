@@ -1,0 +1,14 @@
+# ClaimDesk 247 engine (Stage 2.5 wrapper + Stage 3 logic) — runtime deps.
+# Pinned to match stage-2.5/requirements-dev.txt where they overlap.
+fastapi==0.128.8
+pydantic==2.13.4
+reportlab==4.5.1
+PyYAML==6.0.3
+python-multipart>=0.0.5
+httpx==0.28.1
+# Supabase client for the Stage 4 SessionStore adapter (NOT in requirements-dev.txt
+# — added here because the engine's production store needs it).
+supabase>=2.4,<3
+# Server-side AAL2 verification on /api/brief (CR-5-05 / D-3): verify Supabase
+# ES256 access tokens via JWKS. The [crypto] extra pulls in `cryptography`.
+PyJWT[crypto]>=2.8,<3

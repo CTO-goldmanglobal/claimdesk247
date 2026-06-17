@@ -1,0 +1,163 @@
+# Stage 2.5 Acceptance Tests — Engine-as-Endpoint (HTTP / weblink)
+# Black-box tests against the real API. Runnable two ways:
+#   local:   TestClient(app)
+#   weblink: BASE_URL=https://<preview>.vercel.app  (same cases, live deploy)
+# Green required here AND across Stage 2 (30) + Stage 3 (27) regression (G-48).
+# IDs permanent. 'flow' steps are human-readable; the runner maps them to HTTP calls.
+
+meta:
+  stage: "2.5"
+  base_url_env: BASE_URL              # unset -> local TestClient
+  test_mode_header: "x-test-mode: 1"  # preview/staging only
+  regression:
+    - "../stage-2/acceptance-tests.stage2.yaml"
+    - "../stage-3/acceptance-tests.stage3.yaml"
+
+cases:
+
+# ---- G-41: HTTP parity with the engine ----
+- id: T-25-001
+  gate: G-41
+  desc: "classify over HTTP equals engine.classify for same rear-end intake"
+  flow:
+    - "POST /api/session {channel: web} -> capture reference"
+    - "POST /api/consent {reference, accept: true}"
+    - "POST /api/slot fill: state=NSW, accident_type=rear-end, user_position=front, user_motion=stopped, chain_count=2, sudden_braking=no, brake_lights=working, damage user=rear other=front, injuries=none"
+    - "POST /api/classify {reference}"
+  expect: { band: likely, equals_local_engine: true }
+
+- id: T-25-002
+  gate: G-41
+  desc: "unclear give-way parity"
+  flow:
+    - "session + consent"
+    - "slot fill: state=NSW, accident_type=T-intersection, simultaneous_entry=yes, sight_lines=disputed, injuries=none"
+    - "POST /api/classify"
+  expect: { band: unclear, equals_local_engine: true }
+
+# ---- G-42: disclaimer resolved + enum fail-closed ----
+- id: T-25-003
+  gate: G-42
+  flow:
+    - "session + consent"
+    - "slot fill: rear-end likely"
+    - "POST /api/classify"
+  expect: { disclaimerText_present: true, unresolved_tokens: 0, band_in_enum: true }
+
+- id: T-25-004
+  gate: G-42
+  desc: "engine emitting out-of-enum band -> handled error, never rendered"
+  inputs: { inject_band: "n/a_esc_routed" }
+  expect: { error: true, band_rendered: false }
+
+# ---- G-43: escalation short-circuits over HTTP ----
+- id: T-25-005
+  gate: G-43
+  flow:
+    - "session + consent"
+    - "slot: injuries=serious"
+  expect: { escalation: esc-injury, next: escalated, band_absent: true, terminal: true }
+
+- id: T-25-006
+  gate: G-43
+  flow:
+    - "session + consent"
+    - "slot: chain_count=3"
+  expect: { escalation: esc-multiparty, band_absent: true }
+
+# ---- G-44: no PII in URL ----
+- id: T-25-007
+  gate: G-44
+  desc: "scan all requests made during a full intake"
+  inputs: { run: full_intake, capture: request_urls }
+  expect: { pii_in_url: false, pii_in_query: false, keyed_by: opaque_reference }
+
+- id: T-25-008
+  gate: G-44
+  desc: "pdf path uses opaque ref, not a name"
+  flow:
+    - "complete intake"
+    - "GET /api/pdf/<reference>"
+  expect: { ref_is_opaque: true, pdf_bytes: true }
+
+# ---- G-45: brief role-gated server-side ----
+- id: T-25-009
+  gate: G-45
+  flow:
+    - "GET /api/brief/<reference> as role=customer"
+  expect: { http: 403 }
+
+- id: T-25-010
+  gate: G-45
+  flow:
+    - "GET /api/brief/<reference> as role=legal_staff"
+  expect: { http: 200, brief_fields_present: true }
+
+# ---- G-46: x-test-mode env-gated ----
+- id: T-25-011
+  gate: G-46
+  desc: "test mode seeds deterministic ref on preview"
+  inputs: { header: "x-test-mode: 1", env: preview }
+  expect: { deterministic_reference: true }
+
+- id: T-25-012
+  gate: G-46
+  desc: "test mode inert in production"
+  inputs: { header: "x-test-mode: 1", env: production }
+  expect: { test_mode_active: false }
+
+# ---- G-47: healthz ----
+- id: T-25-013
+  gate: G-47
+  flow:
+    - "GET /healthz"
+  expect: { status: ok, has: [engine_version, rule_tree_version] }
+
+# ---- G-49: CORS ----
+- id: T-25-014
+  gate: G-49
+  inputs: { origin: "https://evil.example.com" }
+  expect: { cors_allowed: false }
+
+- id: T-25-015
+  gate: G-49
+  inputs: { origin: "lovable_preview_origin" }
+  expect: { cors_allowed: true }
+
+# ---- G-48: regression marker ----
+- id: T-25-016
+  gate: G-48
+  inputs: { run: [stage2_suite, stage3_suite] }
+  expect: { stage2: "30/30", stage3: "27/27", any_red: false }
+
+# ---- G-57: MFA required for dashboard roles (legal_staff, admin) ----
+- id: T-25-017
+  gate: G-57
+  inputs:
+    as_email: "lou@legal.example"
+    mfa_verified: false
+  flow:
+    - "POST /api/session"
+    - "POST /api/consent (accept)"
+    - "fill REAR_END_INTAKE"
+    - "POST /api/classify"
+    - "GET /api/brief/:ref  (no X-MFA-Verified header)"
+  expect: { status: 403, detail_contains: "MFA required" }
+
+- id: T-25-018
+  gate: G-57
+  inputs:
+    as_email: "lou@legal.example"
+    mfa_verified: true
+  flow:
+    - "POST /api/session"
+    - "POST /api/consent (accept)"
+    - "fill REAR_END_INTAKE"
+    - "POST /api/classify"
+    - "GET /api/brief/:ref  (X-MFA-Verified: 1)"
+  expect: { status: 200, has: [intake_fields, band, rule_refs] }
+
+coverage_assertion:
+  gates_exercised: [G-41, G-42, G-43, G-44, G-45, G-46, G-47, G-48, G-49, G-57]
+  parity_proven: true
+  runnable_against_weblink: true

@@ -1,0 +1,236 @@
+# Stage 3 Acceptance Tests — Voice · Tow · Rental · Dashboard
+# Fables-specified. Green required across BOTH this suite and Stage 2's 30 (G-39 regression).
+# Voice cases run through VoiceDialogManager as text transcripts (STT/TTS stubbed) — deterministic, no audio.
+# IDs permanent. channel noted per case.
+
+meta:
+  stage: 3
+  spec_version: rule-tree.nsw.v3.json   # post CR-3-04
+  regression_suite: ../stage-2/acceptance-tests.stage2.yaml   # all 30 must pass
+  also_assert: { stage2_tests_green: true }   # G-39
+
+cases:
+
+# ---- G-29: engine parity voice vs web ----
+- id: T-3-001
+  gate: G-29
+  channel: voice
+  desc: same rear-end intake via voice yields same band as web T-2-001
+  inputs: { channel: voice, state: NSW, accident_type: rear-end, user_position: front, user_motion: stopped, chain_count: 2, sudden_braking: no, brake_lights: working, damage: {user: rear, other: front}, injuries: none }
+  expect: { band: likely, same_engine_as_web: true, classify_fn: "app.engine.classify" }
+
+- id: T-3-002
+  gate: G-29
+  channel: voice
+  desc: voice give-way unclear matches web T-2-007 band
+  inputs: { channel: voice, state: NSW, accident_type: T-intersection, simultaneous_entry: yes, sight_lines: disputed, injuries: none }
+  expect: { band: unclear, same_engine_as_web: true }
+
+# ---- G-30: recording consent before PII ----
+- id: T-3-003
+  gate: G-30
+  channel: voice
+  inputs: { channel: voice, recording_consent: accepted, then_capture: name }
+  expect: { consent_before_pii: true, recording_active: true }
+
+- id: T-3-004
+  gate: G-30
+  channel: voice
+  inputs: { channel: voice, recording_consent: declined }
+  expect: { recording_active: false, pii_persisted_before_consent: false, path: non_recorded_or_callback }
+
+# ---- G-31: DTMF fallback ----
+- id: T-3-005
+  gate: G-31
+  channel: voice
+  desc: accident_type via keypad equals speech value
+  inputs: { channel: voice, slot: accident_type, dtmf: "1", mapping: {"1": rear-end} }
+  expect: { slot_value: rear-end, equals_speech_path: true }
+
+- id: T-3-006
+  gate: G-31
+  channel: voice
+  desc: every enum slot exposes a DTMF map
+  inputs: { assert: dtmf_map_present_for, slots: [state, accident_type, damage, control_devices, police_attendance, injuries] }
+  expect: { all_have_dtmf: true }
+
+# ---- G-32: escalation -> warm transfer / callback ----
+- id: T-3-007
+  gate: G-32
+  channel: voice
+  desc: serious injury during business hours -> warm transfer, no fault output
+  inputs: { channel: voice, business_hours: true, injuries: serious }
+  expect: { escalation: esc-injury, action: warm_transfer, fault_output_shown: false, terminal: true }
+
+- id: T-3-008
+  gate: G-32
+  channel: voice
+  desc: dispute after hours -> callback + urgent brief
+  inputs: { channel: voice, business_hours: false, accident_type: rear-end, user_position: behind, user_motion: moving, then_user_disputes_summary: true, injuries: none }
+  expect: { escalation: esc-dispute, action: callback_booking, brief_flagged_urgent: true, terminal: true }
+
+- id: T-3-009
+  gate: G-32
+  channel: voice
+  desc: advice request on voice -> deflect + transfer/callback, never answered
+  inputs: { channel: voice, user_asks: "whose fault is it legally?", injuries: none }
+  expect: { escalation: esc-advice, advice_answered: false, deflected: true }
+
+# ---- G-37: voice disclaimer cadence ----
+- id: T-3-010
+  gate: G-37
+  channel: voice
+  desc: full master read once, short-form on second fault mention
+  inputs: { channel: voice, two_fault_outputs_in_session: true }
+  expect: { master_full_count: 1, short_form_used: true, short_form_words_max: 40, four_elements_present: true }
+
+# ---- G-40: confirm-back + reprompt cap ----
+- id: T-3-011
+  gate: G-40
+  channel: voice
+  inputs: { channel: voice, slot: user_vehicle, value: "white Corolla ABC123" }
+  expect: { confirm_back_prompted: true }
+
+- id: T-3-012
+  gate: G-40
+  channel: voice
+  inputs: { channel: voice, slot: rego, attempts: [unclear, unclear, unclear] }
+  expect: { reprompts: 2, then: callback_offered, dead_end: false }
+
+# ---- G-35: tow flow ----
+- id: T-3-013
+  gate: G-35
+  channel: voice
+  desc: tow hazard yes -> 000 advisory before continuing
+  inputs: { channel: voice, flow: tow, hazard: fuel_leak }
+  expect: { advise_000_first: true, advisory_before_continue: true }
+
+- id: T-3-014
+  gate: G-35
+  channel: voice
+  desc: tow happy path captures slots and emits provider ref
+  inputs: { channel: voice, flow: tow, location: "cnr King & George, Sydney", on_surface: road, vehicle: {make: Toyota, model: Corolla, colour: white, rego: ABC123}, callback: "0400000000" }
+  expect: { slots_captured: [location, on_surface, vehicle, callback], emits: "{{TOW_PROVIDER_REF}}", logged_to_intake: true }
+
+# ---- rental flow + framing ----
+- id: T-3-015
+  gate: G-35
+  channel: web
+  desc: rental eligibility uses general-info framing, not "entitled"
+  inputs: { channel: web, flow: rental, comprehensive: unknown, other_at_fault: unknown }
+  expect: { framing_general: true, forbidden_phrases_absent: ["you are entitled", "you will get", "they will pay"], disclaimer_or_lawyer_pursue_present: true }
+
+- id: T-3-016
+  gate: G-35
+  channel: web
+  desc: rental happy path captures licence/class/location/duration, emits partner ref
+  inputs: { channel: web, flow: rental, licence: {number: "1234", state: NSW, expiry: "2028-01-01"}, class: sedan, pickup: "Sydney CBD", duration: "5 days" }
+  expect: { slots_captured: [licence, class, pickup, duration], emits: "{{RENTAL_PARTNER_REF}}", noted_in_intake: true }
+
+# ---- CR-3-01: parking maps to reversing ----
+- id: T-3-017
+  gate: G-38
+  channel: web
+  inputs: { channel: web, state: NSW, accident_type: parking, injuries: none }
+  expect: { mapped_scenario: s5-reversing, location_flag: car_park }
+
+# ---- CR-3-02: damage enum ----
+- id: T-3-018
+  gate: G-38
+  channel: web
+  inputs: { channel: web, slot: damage, value: "scratched a bit on the side" }
+  expect: { rejected_free_text: true, requires_enum: [front, rear, left, right, multiple] }
+
+# ---- CR-3-04: rule tree v3 clean ----
+- id: T-3-019
+  gate: G-38
+  channel: engine
+  inputs: { assert: no_out_of_enum_band_anywhere, file: rule-tree.nsw.v3.json, scan: [outputs, band_logic] }
+  expect: { out_of_enum_bands: 0, version: "3.0.0" }
+
+# ---- G-33: role-based access ----
+- id: T-3-020
+  gate: G-33
+  channel: dashboard
+  inputs: { role: customer, request: dashboard }
+  expect: { access: denied, http: 403_or_redirect }
+
+- id: T-3-021
+  gate: G-33
+  channel: dashboard
+  inputs: { role: anonymous, request: intake_record }
+  expect: { access: denied, enforced: server_side }
+
+- id: T-3-022
+  gate: G-33
+  channel: dashboard
+  inputs: { role: panel_shop_staff, request: dashboard_list }
+  expect: { access: granted, fields: [date, customer, scenario, band] }
+
+- id: T-3-023
+  gate: G-33
+  channel: dashboard
+  inputs: { role: legal_staff, request: intake_brief }
+  expect: { access: granted, brief_visible: true }
+
+# ---- G-34: audit log immutable + export ----
+- id: T-3-024
+  gate: G-34
+  channel: dashboard
+  inputs: { role: legal_staff, action: attempt_edit_audit_log }
+  expect: { mutation: rejected, log_append_only: true }
+
+- id: T-3-025
+  gate: G-34
+  channel: dashboard
+  inputs: { role: admin, action: export_audit_log }
+  expect: { export: success, contains: [timestamp, session_id, inputs, rule_path, output] }
+
+# ---- G-36: legal-firm intake brief ----
+- id: T-3-026
+  gate: G-36
+  channel: dashboard
+  inputs: { generate: intake_brief, session: completed_rear_end }
+  expect: { fields_present: [intake_fields, band, rule_refs, escalation_flags, evidence_gaps, recommended_action, verbatim_quotes, tow_rental_status], customer_facing: false, percentage_in_brief: false }
+
+# ---- G-39 regression marker ----
+- id: T-3-027
+  gate: G-39
+  channel: regression
+  inputs: { run: stage2_suite }
+  expect: { stage2: "30/30", any_red: false }
+
+# ---- T1: G-PROD-LOCK / G-VER — Legal Head signoff is enforced. ----
+- id: T-1-01
+  gate: G-PROD-LOCK
+  channel: engine
+  desc: signed scenario with current content hash returns a band (G-VER happy path)
+  inputs: { run: classify_signed_s1 }
+  expect: { band_in: [likely, possible, unclear, insufficient], escalation: null }
+
+- id: T-1-02
+  gate: G-PROD-LOCK
+  channel: engine
+  desc: unsigned scenario on the live rule tree escalates (G-PROD-LOCK default)
+  inputs: { run: classify_unsigned_s1 }
+  expect: { band: null, escalation: "unsigned-scenario" }
+
+- id: T-1-03
+  gate: G-VER
+  channel: engine
+  desc: synthetic stale-signoff is detected (approved=True, mismatched version hash)
+  inputs: { run: classify_stale_signoff }
+  expect: { reason: "stale-signoff" }
+
+- id: T-1-04
+  gate: G-VER
+  channel: engine
+  desc: _compute_scenarios_hash is deterministic, 64 hex chars, ignores legal_signoff
+  inputs: { run: hash_determinism }
+  expect: { length: 64, legal_signoff_stripped: true }
+
+coverage_assertion:
+  gates_exercised: [G-29, G-30, G-31, G-32, G-33, G-34, G-35, G-36, G-37, G-38, G-39, G-40, G-PROD-LOCK, G-VER]
+  crs_covered: [CR-3-01, CR-3-02, CR-3-04]
+  voice_engine_parity: true
+  regression: stage2_30_green

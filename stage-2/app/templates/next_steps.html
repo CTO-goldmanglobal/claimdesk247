@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Next steps{% endblock %}
+{% block content %}
+<h1>What happens next</h1>
+<div class="chat">
+  <div class="label">Alex (AI assistant)</div>
+  <p>A lawyer from Goldman Forge Legal will call you back during the next business day during 9:00 am to 5:30 pm, Monday to Friday. Please have your evidence ready.</p>
+</div>
+<form method="post" action="/close">
+  <p><button type="submit">Finish</button></p>
+</form>
+{% endblock %}

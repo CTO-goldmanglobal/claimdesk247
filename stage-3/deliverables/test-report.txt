@@ -1,0 +1,41 @@
+STAGE 3 ACCEPTANCE TEST REPORT
+Generated: 2026-06-14T16:41:49.209704Z
+Suite: acceptance-tests.stage3.yaml
+Stage 2 regression suite: /Users/finn/Smash repair Engine/stage-2/acceptance-tests.stage2.yaml
+
+================================================================================
+[PASS] T-3-001   gate=G-29   escalation=unsigned-scenario (G-PROD-LOCK); scenario=s1-rear-end
+[PASS] T-3-002   gate=G-29   escalation=unsigned-scenario (G-PROD-LOCK); scenario=s2-giveway-t
+[PASS] T-3-003   gate=G-30   consent before any PII; recording_active=True
+[PASS] T-3-004   gate=G-30   decline routed to non_recorded_or_callback
+[PASS] T-3-005   gate=G-31   DTMF '1' -> slot value 'rear-end' accepted
+[PASS] T-3-006   gate=G-31   DTMF maps present for 6 enum slots
+[PASS] T-3-007   gate=G-32   esc-injury -> warm_transfer, no fault output
+[PASS] T-3-008   gate=G-32   esc-dispute -> callback_booking, brief urgent
+[PASS] T-3-009   gate=G-32   advice request not answered, no forbidden phrase in output
+[PASS] T-3-010   gate=G-37   G-PROD-LOCK: engine escalated unsigned-scenario, no disclaimer attached (correct)
+[PASS] T-3-011   gate=G-40   confirm-back prompted for user_vehicle (and 2 total confirm turns)
+[PASS] T-3-012   gate=G-40   re-prompt cap hit, callback offered (no dead-end)
+[PASS] T-3-013   gate=G-35   advise_000=True reason='fuel_leak'
+[PASS] T-3-014   gate=G-35   tow ref=TOW-486A4C, all slots captured, logged
+[PASS] T-3-015   gate=G-35   rental explainer is general-info; no forbidden phrase
+[PASS] T-3-016   gate=G-35   rental ref=REN-B3853E, slots captured, noted
+[PASS] T-3-017   gate=G-38   parking -> s5-reversing (CR-3-01 applied)
+[PASS] T-3-018   gate=G-38   free text rejected with reprompt (CR-3-02)
+[PASS] T-3-019   gate=G-38   version=3.0.0 out_of_enum_bands=0
+[PASS] T-3-020   gate=G-33   role=customer -> 403 (server-side enforced)
+[PASS] T-3-021   gate=G-33   role=anonymous -> 403 (server-side enforced)
+[PASS] T-3-022   gate=G-33   role=panel_shop_staff -> 200 (granted)
+[PASS] T-3-023   gate=G-33   role=legal_staff -> 200 (granted)
+[PASS] T-3-024   gate=G-34   mutation rejected; log_append_only=True
+[PASS] T-3-025   gate=G-34   admin export ok: 1 entries
+[PASS] T-3-026   gate=G-36   brief has all 8 fields, customer_facing=False, no fault %
+[PASS] T-3-027   gate=G-39   stage2: 30/30 green (regression intact)
+[PASS] T-1-01    gate=G-PROD-LOCK  signed scenario -> band=likely (hash match: 1ddabeb5c441...)
+[PASS] T-1-02    gate=G-PROD-LOCK  unsigned scenario -> escalation=unsigned-scenario (G-PROD-LOCK)
+[PASS] T-1-03    gate=G-VER  stale-signoff correctly detected (G-VER); live unsigned scenario also escalated as unsigned-scenario
+[PASS] T-1-04    gate=G-VER  hash deterministic; legal_signoff stripped; len=64; h=1ddabeb5c441...
+================================================================================
+TOTAL: 31  PASS: 31  FAIL: 0
+
+All tests green. Report written to /Users/finn/Smash repair Engine/stage-3/deliverables/test-report.txt

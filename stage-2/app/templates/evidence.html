@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Evidence{% endblock %}
+{% block content %}
+<h1>Evidence checklist</h1>
+<div class="chat">
+  <div class="label">Alex (AI assistant)</div>
+  <p>Before the lawyer calls, please gather as many of these as you can. Each item helps the lawyer understand what happened.</p>
+</div>
+<ul>
+  <li>Photos of all vehicles (front, rear, both sides, close-ups of damage)</li>
+  <li>Photos of the scene — road, signage, skid marks, weather</li>
+  <li>Other driver's name, rego, and insurer details</li>
+  <li>Police event number (if police attended)</li>
+  <li>Witness name(s) and contact details</li>
+  <li>Dashcam footage (yours or theirs)</li>
+  <li>Sketch of vehicle positions at the moment of impact</li>
+  <li>Any nearby CCTV that may have captured the incident</li>
+</ul>
+<form method="post" action="/evidence">
+  <p><button type="submit">Continue</button></p>
+</form>
+{% endblock %}

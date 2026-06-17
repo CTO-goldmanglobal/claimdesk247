@@ -1,0 +1,6 @@
+TOTAL: 30  PASS: 30  FAIL: 0
+
+Coverage: G-15, G-16, G-17, G-18, G-19, G-20, G-21, G-22, G-26
+(Exercised gates map per acceptance-tests.stage2.yaml coverage_assertion.)
+
+All tests green. No failures.

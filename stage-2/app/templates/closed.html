@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Done{% endblock %}
+{% block content %}
+<h1>You're all done</h1>
+<p>Your reference number is <span class="ref">{{ reference }}</span>.</p>
+<p>Please save this reference. You'll get an SMS with a link to a PDF summary of what we've recorded.</p>
+<p><a href="/pdf/{{ reference }}"><button>Download PDF summary</button></a></p>
+<p style="font-size: 0.85rem; color: #4a5568;">This conversation is general information, not legal advice, and a lawyer will review your full situation.</p>
+{% endblock %}

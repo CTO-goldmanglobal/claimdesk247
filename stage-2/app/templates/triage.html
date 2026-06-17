@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Triage{% endblock %}
+{% block content %}
+<h1>Quick safety check</h1>
+<div class="chat">
+  <div class="label">Alex (AI assistant)</div>
+  <p>Before we go through the details, I need to check a few things for your safety.</p>
+</div>
+<form method="post" action="/intake">
+  <input type="hidden" name="slot_id" value="1">
+  <label>Is anyone hurt?
+    <select name="value" required>
+      <option value="">Please choose</option>
+      <option value="none">No, no-one is hurt</option>
+      <option value="minor">Yes, minor injuries</option>
+      <option value="serious">Yes, serious injuries</option>
+    </select>
+  </label>
+  <p style="font-size: 0.85rem; color: #c53030;">If anyone is seriously hurt, please call 000 immediately.</p>
+  <p><button type="submit">Continue</button></p>
+</form>
+{% endblock %}

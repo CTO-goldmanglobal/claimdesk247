@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}General information{% endblock %}
+{% block content %}
+<h1>General information</h1>
+<div class="disclaimer">
+  <p>{{ master }}</p>
+</div>
+<div class="chat">
+  <div class="label">Alex (AI assistant)</div>
+  <p>Here's what I can tell you about how collisions like this are usually understood under NSW road rules. A lawyer will review the full details.</p>
+</div>
+<div class="panel">
+  <p><small>Scenario: <code>{{ scenario_id }}</code> · Band: <code>{{ band }}</code></small></p>
+  <p>{{ text_resolved|safe }}</p>
+</div>
+<form method="post" action="/fault-info/accept">
+  <p><button type="submit">Continue to evidence checklist</button></p>
+</form>
+{% endblock %}

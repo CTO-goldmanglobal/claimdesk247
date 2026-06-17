@@ -1,0 +1,80 @@
+STAGE 4 — COMBINED ACCEPTANCE TEST REPORT
+Project: AI Legal Receptionist + Accident Intake System
+Generated: 2026-06-13
+Total: 75/75 GREEN (30 + 27 + 18)
+
+================================================================
+STAGE 2 — Engine + PDF + Web Intake
+================================================================
+Source: stage-2/tests/run_acceptance.py
+YAML:   stage-2/acceptance-tests.stage2.yaml
+Cases:  30
+Status: 30 PASS, 0 FAIL
+Report: stage-2/deliverables/test-report.txt
+
+================================================================
+STAGE 3 — Voice + Tow/Rental + Dashboard
+================================================================
+Source: stage-3/tests/run_acceptance.py
+YAML:   stage-3/acceptance-tests.stage3.yaml
+Cases:  27
+Status: 27 PASS, 0 FAIL
+Report: stage-3/deliverables/test-report.txt
+
+================================================================
+STAGE 2.5 — HTTP API Wrapper (weblink-runner compatible)
+================================================================
+Source: stage-2.5/tests/run_acceptance.py
+YAML:   stage-2.5/acceptance-tests.stage25.yaml
+Cases:  18 (16 original + 2 new MFA tests for G-57)
+Status: 18 PASS, 0 FAIL
+  - T-25-001..T-25-016: original suite (16 cases)
+  - T-25-017 (G-57): legal_staff w/o MFA -> 403
+  - T-25-018 (G-57): legal_staff w/ MFA -> 200
+Report: stage-2.5/deliverables/test-report.txt
+
+================================================================
+REGRESSION (T-25-016) — Stage 2 + Stage 3 re-run as subprocesses
+================================================================
+Stage 2: 30/30 green
+Stage 3: 27/27 green
+Combined: 57/57 green (no regressions from the Stage 2.5 wrapper)
+
+================================================================
+GRAND TOTAL
+================================================================
+| Stage | Cases | Pass | Fail |
+|-------|-------|------|------|
+| 2     | 30    | 30   | 0    |
+| 3     | 27    | 27   | 0    |
+| 2.5   | 18    | 18   | 0    |
+| TOTAL | 75    | 75   | 0    |
+
+================================================================
+WHAT THIS PROVES
+================================================================
+- The deterministic engine still produces the right band / escalations
+  for all 30 Stage 2 cases (G-14..G-19).
+- The voice dialog, tow/rental flows, dashboard, and audit log all
+  work correctly for all 27 Stage 3 cases (G-29..G-40).
+- The Stage 2.5 HTTP API wrapper (FastAPI) preserves parity with the
+  engine, fail-closes on out-of-enum bands, escalates correctly, and
+  enforces role + MFA on the brief endpoint (G-41..G-49 + G-57).
+- The CR-5-02 CORS lockdown does not break any test (allow-list in
+  test mode is `*`; production deployer locks to the project slug).
+- The CR-5-03 rate limit does not break any test (test mode uses very
+  high burst via env vars; production deployer caps as needed).
+- The CR-4-01 free-text followup robustness did not regress T-3-010.
+
+================================================================
+WHAT THIS DOES NOT PROVE (deployer-evidence)
+================================================================
+- Live Vercel + Supabase deployment (no real project in this env).
+- RLS policies actually enforced in the live DB (verify by SQL).
+- MFA wired to a real OIDC/SAML provider (the contract is a header
+  stub; deployer wires the real provider).
+- Region = Sydney; function region = syd1 (config-only).
+- CORS lockdown against the production origin (covered by
+  preflight.py:g55_cors_locked which the deployer runs).
+
+All deployer-evidence gates are verified by stage-4/scripts/preflight.py.

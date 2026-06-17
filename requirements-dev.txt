@@ -1,0 +1,33 @@
+# Stage 2.5 dev / weblink-runner dependencies
+# Pinned per CR-4-04 — the weblink runner needs these exact versions
+# (or close) to reproduce the local green-bar result.
+#
+# Install:
+#   pip install -r requirements-dev.txt
+#
+# Run the local test suite:
+#   cd stage-2.5 && python3 tests/run_acceptance.py
+#
+# Run the same suite against a deployed weblink:
+#   BASE_URL=https://<preview>.vercel.app python3 tests/run_acceptance.py
+
+# Web framework (also used for TestClient in local mode)
+fastapi==0.128.8
+
+# Pydantic (FastAPI's data models)
+pydantic==2.13.4
+
+# PDF generation
+reportlab==4.5.1
+
+# PDF text extraction (used by Stage 2 regression)
+pypdf==6.13.2
+
+# YAML loader (acceptance tests)
+PyYAML==6.0.3
+
+# HTTP client (used when BASE_URL is set; also pulled in by TestClient)
+httpx==0.28.1
+
+# Multipart form parsing (required by FastAPI form routes)
+python-multipart>=0.0.5

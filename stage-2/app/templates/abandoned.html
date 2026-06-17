@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Session ended{% endblock %}
+{% block content %}
+<h1>No problem</h1>
+{% if reference %}
+<p>Your reference is <span class="ref">{{ reference }}</span> — you can come back to this later if you change your mind.</p>
+{% else %}
+<p>We didn't keep any details, since you didn't give consent. If you'd like to start again, you can <a href="/consent">go through the privacy notice once more</a>.</p>
+{% endif %}
+{% endblock %}

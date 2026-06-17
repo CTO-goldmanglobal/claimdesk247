@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Privacy &amp; consent{% endblock %}
+{% block content %}
+<h1>Before we start</h1>
+<div class="panel">
+  <h3>Privacy notice</h3>
+  <p>{{ privacy_notice }}</p>
+</div>
+<div class="chat">
+  <div class="label">Alex (AI assistant)</div>
+  <p>Please confirm you've read the privacy notice, and we'll get started.</p>
+</div>
+<form method="post" action="/consent">
+  <p>
+    <label>
+      <input type="radio" name="privacy_acknowledged" value="yes" required>
+      I've read the privacy notice and consent to the collection of my details
+    </label>
+  </p>
+  <p>
+    <label>
+      <input type="radio" name="privacy_acknowledged" value="no">
+      No, I don't consent (we'll stop here)
+    </label>
+  </p>
+  <p><button type="submit">Continue</button></p>
+</form>
+{% endblock %}

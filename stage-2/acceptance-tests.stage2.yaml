@@ -1,0 +1,210 @@
+# Stage 2 Acceptance Tests — AI Legal Receptionist
+# Fables-specified, builder-implemented. Green (0 failures) required before audit.
+# IDs are permanent; Stage 3 keeps all green (regression). channel: web (Stage 2).
+# Each case: inputs = scripted user turns/slot values; expect = observable outcome.
+# Outcomes checked, not wording quality: band, escalation, disclaimer_attached,
+# end_state, classification_attempted, pii_persisted, percentage_in_output.
+
+meta:
+  stage: 2
+  spec_version: rule-tree.nsw.v2.json   # post CR-2-01
+  channel: web
+  bands: [likely, possible, unclear, insufficient]
+
+cases:
+# ---- SCENARIO 1: REAR-END (4 bands) ----
+- id: T-2-001
+  gate: G-15
+  scenario: rear-end
+  inputs: { state: NSW, accident_type: rear-end, user_position: front, user_motion: stopped, chain_count: 2, sudden_braking: no, brake_lights: working, damage: {user: rear, other: front}, injuries: none }
+  expect: { band: likely, disclaimer_attached: true, escalation: none, classification_attempted: true, end_state: S8-CLOSE }
+
+- id: T-2-002
+  gate: G-15
+  scenario: rear-end
+  inputs: { state: NSW, accident_type: rear-end, user_position: behind, user_motion: moving, chain_count: 2, sudden_braking: yes, damage: {user: front, other: rear}, injuries: none }
+  expect: { band: possible, disclaimer_attached: true, escalation: none }
+
+- id: T-2-003
+  gate: G-15
+  scenario: rear-end
+  inputs: { state: NSW, accident_type: rear-end, user_position: front, user_motion: stopped, chain_count: 2, front_reversed: yes, damage: {user: rear, other: rear}, injuries: none }
+  expect: { band: unclear, disclaimer_attached: true }   # damage mismatch + flag_unclear
+
+- id: T-2-004
+  gate: G-15
+  scenario: rear-end
+  inputs: { state: NSW, accident_type: rear-end, user_position: unsure, incomplete: true, injuries: none }
+  expect: { band: insufficient, disclaimer_attached: true }
+
+# ---- SCENARIO 2: GIVE WAY / T-INTERSECTION ----
+- id: T-2-005
+  gate: G-15
+  scenario: giveway-t
+  inputs: { state: NSW, accident_type: T-intersection, user_road: terminating, sight_lines: clear, simultaneous_entry: no, controls: none, injuries: none }
+  expect: { band: likely, disclaimer_attached: true }
+
+- id: T-2-006
+  gate: G-15
+  scenario: giveway-t
+  inputs: { state: NSW, accident_type: T-intersection, user_road: continuing, sight_lines: obstructed, injuries: none }
+  expect: { band: possible, disclaimer_attached: true }
+
+- id: T-2-007
+  gate: G-15
+  scenario: giveway-t
+  inputs: { state: NSW, accident_type: T-intersection, simultaneous_entry: yes, sight_lines: disputed, injuries: none }
+  expect: { band: unclear, disclaimer_attached: true }
+
+# ---- SCENARIO 3: ROUNDABOUT ----
+- id: T-2-008
+  gate: G-15
+  scenario: roundabout
+  inputs: { state: NSW, accident_type: roundabout, user_action: entering, other_action: circulating, lanes: single, injuries: none }
+  expect: { band: likely, disclaimer_attached: true }
+
+- id: T-2-009
+  gate: G-15
+  scenario: roundabout
+  inputs: { state: NSW, accident_type: roundabout, user_action: circulating, other_action: entering, lanes: multi, other_indicated: no, injuries: none }
+  expect: { band: possible, disclaimer_attached: true }
+
+- id: T-2-010
+  gate: G-15
+  scenario: roundabout
+  inputs: { state: NSW, accident_type: roundabout, lanes: multi, exit_conflict: yes, injuries: none }
+  expect: { band: unclear, disclaimer_attached: true }
+
+# ---- SCENARIO 4: LANE CHANGE / MERGE ----
+- id: T-2-011
+  gate: G-15
+  scenario: lane-merge
+  inputs: { state: NSW, accident_type: merge, user_action: changing_lanes, crossed_lines: yes, injuries: none }
+  expect: { band: likely, disclaimer_attached: true }
+
+- id: T-2-012
+  gate: G-15
+  scenario: lane-merge
+  inputs: { state: NSW, accident_type: merge, zip_merge: yes, user_position: ahead, injuries: none }
+  expect: { band: possible, disclaimer_attached: true }   # zip merge dispute
+
+- id: T-2-013
+  gate: G-15
+  scenario: lane-merge
+  inputs: { state: NSW, accident_type: merge, simultaneous_lane_change: yes, injuries: none }
+  expect: { band: unclear, disclaimer_attached: true }
+
+# ---- SCENARIO 5: REVERSING ----
+- id: T-2-014
+  gate: G-15
+  scenario: reversing
+  inputs: { state: NSW, accident_type: reversing, user_action: reversing, other_stationary: yes, location: road, injuries: none }
+  expect: { band: likely, disclaimer_attached: true }
+
+- id: T-2-015
+  gate: G-15
+  scenario: reversing
+  inputs: { state: NSW, accident_type: reversing, location: car_park, both_moving: yes, injuries: none }
+  expect: { band: unclear, disclaimer_attached: true }   # car park shared-fault exception
+
+# ---- SCENARIO 6: MULTI-VEHICLE / CHAIN (+ CR-2-01) ----
+- id: T-2-016
+  gate: G-19
+  scenario: multi-chain
+  inputs: { state: NSW, accident_type: rear-end, chain_count: 3, injuries: none }
+  expect: { escalation: esc-multiparty, band: null, classification_attempted: false, end_state: SX }
+
+- id: T-2-017
+  gate: G-15
+  scenario: multi-chain
+  inputs: { state: NSW, accident_type: other, chain_count: 2, multi_complex: yes, injuries: none }
+  expect: { band: unclear, disclaimer_attached: true }
+
+# ---- ESCALATION TRIGGERS (all 7) ----
+- id: T-2-018
+  gate: G-20
+  scenario: any
+  inputs: { state: NSW, injuries: serious }
+  expect: { escalation: esc-injury, fault_output_shown: false, escalation_before_fault: true, end_state: SX }
+
+- id: T-2-019
+  gate: G-19
+  scenario: any
+  inputs: { state: NSW, accident_type: rear-end, hit_and_run: yes, injuries: none }
+  expect: { escalation: esc-hitrun, classification_attempted: false, end_state: SX }
+
+- id: T-2-020
+  gate: G-19
+  scenario: any
+  inputs: { state: NSW, vulnerable_party: cyclist, injuries: none }
+  expect: { escalation: esc-vulnerable, end_state: SX }
+
+- id: T-2-021
+  gate: G-19
+  scenario: any
+  inputs: { state: NSW, accident_type: rear-end, rego_mismatch: yes, injuries: none }
+  expect: { escalation: esc-fraud, end_state: SX, accusatory_language: false }
+
+- id: T-2-022
+  gate: G-19
+  scenario: rear-end
+  inputs: { state: NSW, accident_type: rear-end, user_position: behind, user_motion: moving, then_user_disputes_summary: true, injuries: none }
+  expect: { escalation: esc-dispute, end_state: SX }
+
+- id: T-2-023
+  gate: G-19
+  scenario: any
+  inputs: { state: NSW, user_asks: "am I going to win my case?", injuries: none }
+  expect: { escalation: esc-advice, advice_answered: false, deflected: true, end_state: SX }
+
+# ---- DISCLAIMER / NO-PERCENTAGE / RENDER ----
+- id: T-2-024
+  gate: G-18
+  scenario: rear-end
+  inputs: { state: NSW, accident_type: rear-end, user_position: front, user_motion: stopped, chain_count: 2, injuries: none }
+  expect: { unresolved_tokens_at_render: 0, master_string_present: true }
+
+- id: T-2-025
+  gate: G-17
+  scenario: all
+  inputs: { run: all_band_outputs }
+  expect: { percentage_in_output: false, split_ratio_in_output: false }
+
+- id: T-2-026
+  gate: G-17
+  scenario: multi-chain
+  inputs: { state: NSW, accident_type: other, chain_count: 2, multi_complex: yes, injuries: none }
+  expect: { percentage_in_output: false }   # s6 must not surface 60/40 etc to user
+
+- id: T-2-027
+  gate: G-16
+  scenario: engine
+  inputs: { inject_band: "n/a_esc_routed" }
+  expect: { engine_error: true, rendered_to_user: false }   # fail-closed on out-of-enum band
+
+# ---- STATE SCOPE ----
+- id: T-2-028
+  gate: G-21
+  scenario: any
+  inputs: { state: QLD, accident_type: rear-end }
+  expect: { state_scope_guard_shown: true, classification_attempted: false, escalation: callback, end_state: SX }
+
+# ---- CONSENT / PII ----
+- id: T-2-029
+  gate: G-22
+  scenario: any
+  inputs: { consent: declined }
+  expect: { pii_persisted: false, end_state: S9-ABANDON }
+
+# ---- ABANDON / RE-PROMPT ----
+- id: T-2-030
+  gate: G-26
+  scenario: rear-end
+  inputs: { state: NSW, accident_type: rear-end, slot_user_vehicle: [invalid, invalid, invalid] }
+  expect: { reprompts: 2, then: callback_offered, dead_end: false }
+
+coverage_assertion:
+  # Fables checks this maps before accepting the suite
+  gates_exercised: [G-15, G-16, G-17, G-18, G-19, G-20, G-21, G-22, G-26]
+  scenarios_all_4_bands: [s1]   # s1 full 4-band; s2-s5 >=3 bands; s6 via escalation
+  all_7_escalations: [esc-injury, esc-hitrun, esc-vulnerable, esc-fraud, esc-dispute, esc-multiparty, esc-advice]

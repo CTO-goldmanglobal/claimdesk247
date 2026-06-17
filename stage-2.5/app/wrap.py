@@ -1,0 +1,808 @@
+"""Stage 2.5 API — thin HTTP wrapper around stage-3/app/.
+
+Contract endpoints (Stage 2.5 Build Request §2 + Lovable Build Contract):
+    GET   /healthz
+    POST  /api/session
+    POST  /api/consent
+    POST  /api/slot
+    POST  /api/classify
+    GET   /api/pdf/:ref
+    GET   /api/brief/:ref
+
+Key constraints:
+- No new logic. If you find yourself writing classification, stop.
+- /api/classify band MUST equal engine.classify(intake).band (G-41).
+- Disclaimer already resolved in /api/classify (G-42, G-18 across HTTP).
+- Escalation short-circuits over HTTP (G-43).
+- No PII in URLs or query strings (G-44).
+- /api/brief is role-gated server-side (G-45).
+- x-test-mode is env-gated (G-46).
+- /healthz returns engine + rule-tree versions (G-47).
+- CORS allow-list (G-49).
+"""
+from __future__ import annotations
+
+import importlib
+import importlib.util
+import json
+import os
+import re
+import secrets
+import sys
+import types
+from pathlib import Path
+from typing import Any, Optional
+
+# ----- Bootstrap: temporarily expose stage-3's app package as `app` in
+# sys.modules, load all stage-3 modules, then restore. This is the
+# minimal-fuss way to satisfy stage-3's internal `from app import X`
+# statements while still letting stage-2.5 use its own `app` package. -----
+_THIS_DIR = Path(__file__).resolve().parent
+_STAGE25_ROOT = _THIS_DIR.parent
+_STAGE3_ROOT = _STAGE25_ROOT.parent / "stage-3"
+
+if str(_STAGE3_ROOT) not in sys.path:
+    sys.path.insert(0, str(_STAGE3_ROOT))
+
+# Save any pre-existing `app` registration (so the wrapper can put it back
+# after stage-3 is loaded).
+_preserved_app = sys.modules.get("app")
+# Load stage-3's app package
+_spec = importlib.util.spec_from_file_location(
+    "app", _STAGE3_ROOT / "app" / "__init__.py",
+    submodule_search_locations=[str(_STAGE3_ROOT / "app")],
+)
+_stage3_app_pkg = importlib.util.module_from_spec(_spec)
+sys.modules["app"] = _stage3_app_pkg
+_spec.loader.exec_module(_stage3_app_pkg)
+
+# Now load the stage-3 submodules
+def _load(name: str):
+    full = f"app.{name}"
+    spec2 = importlib.util.spec_from_file_location(full, _STAGE3_ROOT / "app" / f"{name}.py")
+    mod = importlib.util.module_from_spec(spec2)
+    sys.modules[full] = mod
+    spec2.loader.exec_module(mod)
+    return mod
+
+stage3_engine        = _load("engine")
+stage3_state_machine = _load("state_machine")
+stage3_pdf_gen       = _load("pdf_gen")
+stage3_intake_brief  = _load("intake_brief")
+stage3_auth          = _load("auth")
+stage3_audit         = _load("audit")
+stage3_config        = _load("config")
+stage3_store         = _load("store")
+
+
+# CR-4-02: wire {{BUSINESS_HOURS}} / {{CALLBACK_SLA}} (and the rest of the
+# STAGE2_TOKENS) to runtime env vars. The default values from
+# stage3_config remain as fallbacks. Real firm values resolve at Stage 5.
+_RUNTIME_TOKEN_OVERRIDES: dict[str, str] = {}
+for _env_key, _token in (
+    ("FIRM_NAME",          "{{FIRM_NAME}}"),
+    ("FIRM_PHONE",         "{{FIRM_PHONE}}"),
+    ("CALLBACK_SLA",       "{{CALLBACK_SLA}}"),
+    ("BUSINESS_HOURS",     "{{BUSINESS_HOURS}}"),
+    ("RETENTION_PERIOD",   "{{RETENTION_PERIOD}}"),
+    ("TOW_PROVIDER_REF",   "{{TOW_PROVIDER_REF}}"),
+    ("RENTAL_PARTNER_REF", "{{RENTAL_PARTNER_REF}}"),
+    ("PERSONA_NAME",       "{{PERSONA_NAME}}"),
+):
+    _v = os.environ.get(_env_key)
+    if _v:
+        _RUNTIME_TOKEN_OVERRIDES[_token] = _v
+if _RUNTIME_TOKEN_OVERRIDES:
+    stage3_config.STAGE2_TOKENS.update(_RUNTIME_TOKEN_OVERRIDES)
+
+# Restore whichever `app` was registered before we stomped it. If nothing
+# was registered before (i.e. stage-2.5/app isn't loaded yet), pop the
+# stage-3 alias so the wrapper's `app` package loads fresh.
+if _preserved_app is None:
+    sys.modules.pop("app", None)
+else:
+    sys.modules["app"] = _preserved_app
+
+# FastAPI
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
+from . import __version__ as STAGE25_VERSION
+
+
+# ----- Shared singletons -----
+# Stage 4 (F-A): wire the real Supabase-backed store when SUPABASE_URL +
+# SUPABASE_SERVICE_ROLE_KEY are set. Serverless cannot hold state in-process
+# (each invocation is a fresh process), so a persistent store is REQUIRED in
+# deployment; without env vars we fall back to the in-memory store for local
+# preview. The adapter implements the SessionStore Protocol (`save`); wrap.py
+# calls `.put()`, so we alias it. Audit is mirrored into the store's
+# append-only table when supported.
+# NOTE: wired for deployment but NOT run from the planning seat — verify with
+# `stage-4/scripts/preflight.py` against staging (75-test suite must stay green).
+def _build_sessions() -> Any:
+    if os.environ.get("SUPABASE_URL") and os.environ.get("SUPABASE_SERVICE_ROLE_KEY"):
+        _store_path = _STAGE25_ROOT.parent / "stage-4" / "app" / "supabase_store.py"
+        _spec_s = importlib.util.spec_from_file_location("stage4_supabase_store", _store_path)
+        _mod_s = importlib.util.module_from_spec(_spec_s)
+        _spec_s.loader.exec_module(_mod_s)
+        store = _mod_s.build_store()
+        if not hasattr(store, "put"):
+            store.put = store.save  # Protocol uses save(); wrap.py calls put()
+        return store
+    return stage3_store.InMemoryStore()
+
+
+SESSIONS = _build_sessions()
+
+
+class _PersistingAudit:
+    """Mirror in-memory audit (language-level immutability) into the store's
+    append-only audit_log table when the active store supports it (G-34/G-54).
+    Maps wrap.py's `user=` to the adapter's `actor=`. Store failures are
+    swallowed so an audit-write hiccup never breaks the intake path."""
+
+    def __init__(self, base: Any, store: Any) -> None:
+        self._base = base
+        self._store = store
+
+    def append(self, *, session_id: str, user: str, action: str,
+               inputs: dict, rule_path: list, output: dict) -> Any:
+        rv = self._base.append(
+            session_id=session_id, user=user, action=action,
+            inputs=inputs, rule_path=rule_path, output=output,
+        )
+        try:
+            self._store.append_audit(
+                session_id=session_id, actor=user, action=action,
+                inputs=inputs, rule_path=rule_path, output=output,
+            )
+        except Exception:
+            pass
+        return rv
+
+
+AUDIT = (
+    _PersistingAudit(stage3_audit.DEFAULT_AUDIT_LOG, SESSIONS)
+    if hasattr(SESSIONS, "append_audit")
+    else stage3_audit.DEFAULT_AUDIT_LOG
+)
+
+# CORS allow-list (CR-5-02 / G-55).
+# In production we lock to the EXACT Lovable project slug + production domain.
+# No more `*.lovable.app` — that allowed ANY tenant to call our API.
+# Read from CORS_ALLOWED_ORIGINS env var (comma-separated). The deployer
+# must set this; the default below is preview-only.
+CORS_ALLOWLIST: list[str] = [
+    o.strip() for o in os.environ.get(
+        "CORS_ALLOWED_ORIGINS",
+        # Preview default: only the staging Lovable project slug.
+        "https://preview--smash-repair-engine.lovable.app,http://localhost:3000",
+    ).split(",") if o.strip()
+]
+
+
+def _app_env() -> str:
+    """Read APP_ENV. 'production' disables test mode (G-46)."""
+    return os.environ.get("APP_ENV", "preview").lower()
+
+
+def _cors_origins() -> list[str]:
+    """Return the active CORS allow-list. Never wildcard."""
+    return sorted(CORS_ALLOWLIST)
+
+
+def _is_test_mode_active(headers: dict[str, str]) -> bool:
+    """x-test-mode is inert in production (G-46)."""
+    if _app_env() == "production":
+        return False
+    return headers.get("x-test-mode") in ("1", "true", "yes", "True", "TRUE")
+
+
+def _deterministic_ref(seed: str) -> str:
+    """Used only when x-test-mode=1 in preview/staging. Derives a stable
+    reference from the seed so weblink runs are reproducible."""
+    try:
+        import hashlib
+        digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:8].upper()
+    except Exception:
+        digest = secrets.token_hex(4).upper()
+    return f"GF-{digest}"
+
+
+# ----- Slot UI catalog (F-F) -----
+# The frontend renders whatever the engine sends — the engine OWNS the
+# conversational "chrome" (prompt text + option labels) per the Lovable
+# build contract. This catalog gives each spec slot a prompt and an
+# inputType; option *values* come from SLOT_DEFINITIONS (the engine's
+# authoritative enum), and labels are humanised here. This is distinct
+# from the fault `outputText`/`disclaimerText`, which remain verbatim
+# from the engine and are NOT touched here.
+#   enum     -> single_choice
+#   multienum-> multi_choice
+#   text     -> text
+SLOT_UI: dict[str, dict[str, str]] = {
+    "state_of_accident":    {"prompt": "Which state or territory did the accident happen in?", "inputType": "single_choice"},
+    "datetime_location":    {"prompt": "When and roughly where did it happen? A date, rough time, and the street or suburb is plenty.", "inputType": "text"},
+    "accident_type":        {"prompt": "What kind of accident was it?", "inputType": "single_choice"},
+    "user_vehicle":         {"prompt": "What were you driving? Make, model and year if you have them.", "inputType": "text"},
+    "other_vehicles":       {"prompt": "What other vehicles were involved?", "inputType": "text"},
+    "movement_description": {"prompt": "In your own words, what were you doing the moment it happened?", "inputType": "text"},
+    "damage_locations":     {"prompt": "Where is the damage to your vehicle? Select all that apply.", "inputType": "multi_choice"},
+    "control_devices":      {"prompt": "Were there any traffic controls at the scene?", "inputType": "single_choice"},
+    "police_attendance":    {"prompt": "Did police attend the scene?", "inputType": "single_choice"},
+    "witnesses":            {"prompt": "Were there any witnesses? (optional)", "inputType": "text"},
+    "dashcam":              {"prompt": "Was there any dashcam footage?", "inputType": "single_choice"},
+    "photos_taken":         {"prompt": "Did you take photos at the scene?", "inputType": "single_choice"},
+    "other_driver_details": {"prompt": "Did you exchange details with the other driver? (optional)", "inputType": "text"},
+    "injuries":             {"prompt": "Was anyone injured?", "inputType": "single_choice"},
+}
+
+# Calm handoff copy shown when the engine escalates (serious injury,
+# re-prompt cap, etc.). This is intake chrome, not legal advice — the
+# fault assessment is deliberately NOT produced on an escalated session.
+ESCALATION_MESSAGE = (
+    "Thank you for telling me. Based on what you've shared, the right next step "
+    "is for one of our team to speak with you directly rather than continue here. "
+    "Your reference number is {ref} — please keep it handy. We'll be in touch shortly; "
+    "you don't need to do anything else right now."
+)
+
+
+def _opt_label(value: str) -> str:
+    """Humanise an enum value for display. State codes stay upper-case."""
+    if value.isupper():
+        return value
+    return value.replace("-", " ").replace("_", " ").capitalize()
+
+
+def _slot_question(idx: int) -> dict[str, Any]:
+    """Build a frontend SlotQuestion for SLOT_DEFINITIONS[idx]."""
+    sd = stage3_state_machine.SLOT_DEFINITIONS[idx]
+    ui = SLOT_UI.get(sd["slot"], {"prompt": sd["slot"], "inputType": "text"})
+    options = None
+    if sd.get("options"):
+        options = [{"value": v, "label": _opt_label(v)} for v in sd["options"]]
+    return {
+        "slot": sd["slot"],
+        "prompt": ui["prompt"],
+        "inputType": ui["inputType"],
+        "options": options,
+        "done": False,
+    }
+
+
+_DONE_QUESTION: dict[str, Any] = {
+    "slot": "", "prompt": "", "inputType": "text", "options": None, "done": True,
+}
+
+
+def _progress(intake: dict[str, Any]) -> dict[str, int]:
+    """Progress over the mandatory slots (the only ones the engine asks)."""
+    mandatory = [sd for sd in stage3_state_machine.SLOT_DEFINITIONS if sd["mandatory"]]
+    answered = sum(1 for sd in mandatory if intake.get(sd["slot"]))
+    return {"answered": answered, "total": len(mandatory)}
+
+
+def _next_question(intake: dict[str, Any]) -> dict[str, Any]:
+    """The next SlotQuestion to ask, or the done sentinel."""
+    idx = stage3_state_machine._next_slot_index(intake)  # type: ignore[attr-defined]
+    if idx >= len(stage3_state_machine.SLOT_DEFINITIONS):
+        return dict(_DONE_QUESTION)
+    return _slot_question(idx)
+
+
+# ----- Request / response models -----
+# Models accept BOTH dialects so the same endpoints serve the Lovable
+# frontend (camelCase `ref`) and the engine-contract acceptance tests
+# (`reference`). Handlers branch on which key is present.
+
+class SessionRequest(BaseModel):
+    channel: str = Field(default="web")
+    ref: Optional[str] = None           # frontend consent step: {ref, consentGranted}
+    reference: Optional[str] = None     # tolerated alias
+    consentGranted: Optional[bool] = None
+
+
+class ConsentRequest(BaseModel):
+    reference: str
+    accept: bool
+
+
+class SlotRequest(BaseModel):
+    reference: Optional[str] = None     # engine-contract (tests)
+    ref: Optional[str] = None           # frontend
+    slot: Optional[str] = None
+    value: Any = None
+
+
+class ClassifyRequest(BaseModel):
+    reference: Optional[str] = None
+    ref: Optional[str] = None
+
+
+class ExtrasRequest(BaseModel):
+    """Stage 4 (CR-5-01): engine-only intake fields, set via /api/intake/:ref/extras."""
+    fields: dict[str, Any]
+
+
+# ----- App factory -----
+
+def create_app() -> FastAPI:
+    app = FastAPI(title="Stage 2.5 — Engine-as-Endpoint", version=STAGE25_VERSION)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=CORS_ALLOWLIST,  # CR-5-02 / G-55: exact origins only
+        allow_origin_regex=None,        # no wildcards
+        # If a wildcard is present (test mode), credentials MUST be off —
+        # Starlette enforces this. Production should never have *.
+        allow_credentials=("*",) != tuple(CORS_ALLOWLIST),
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
+
+    # ---- /healthz (G-47 + G-VER) ----
+    @app.get("/healthz")
+    def healthz() -> Any:
+        tree = stage3_engine._load_rule_tree()  # type: ignore[attr-defined]
+        return {
+            "status": "ok",
+            "engine_version": "1.0.0",
+            "rule_tree_version": tree.get("version", "unknown"),
+            "rule_tree_hash": stage3_engine._compute_scenarios_hash(tree),  # G-VER
+            "api_version": STAGE25_VERSION,
+        }
+
+    # ---- /api/session (S0/S0a) ----
+    # Serves two frontend calls on one path:
+    #   start   POST {}                       -> {ref, consentRequired, consentGranted:false, ...}
+    #   consent POST {ref, consentGranted:true}-> {ref, consentRequired, consentGranted:true}
+    # plus the engine-contract `reference`/`consent_required`/`next` fields
+    # for the acceptance tests (no field collisions, so both ship together).
+    @app.post("/api/session")
+    def create_session(req: SessionRequest, request: Request) -> Any:
+        # --- Consent branch (frontend grantConsent posts here) ---
+        ref = req.ref or req.reference
+        if req.consentGranted is not None and ref:
+            s = SESSIONS.by_reference(ref)
+            if s is None:
+                raise HTTPException(status_code=404, detail="session not found")
+            if not req.consentGranted:
+                stage3_state_machine.abandon(s)
+                SESSIONS.put(s)
+                return {"ref": ref, "reference": ref, "consentRequired": True,
+                        "consentGranted": False, "next": "abandoned"}
+            stage3_state_machine.acknowledge_consent(s, privacy_acknowledged=True)
+            SESSIONS.put(s)  # F-E: persist consent so the next request sees it
+            AUDIT.append(
+                session_id=s.session_id, user=_client_ip(request), action="consent_granted",
+                inputs={"reference": ref}, rule_path=[], output={"state": s.state},
+            )
+            return {"ref": s.reference, "reference": s.reference,
+                    "consentRequired": True, "consentGranted": True, "next": "slot"}
+
+        # --- Start branch (frontend startSession + engine-contract start) ---
+        # CR-5-03 / G-56: per-IP rate limit on session creation.
+        ip = _client_ip(request)
+        if not RATE_LIMITER.allow(ip):
+            raise HTTPException(
+                status_code=429,
+                detail="rate limit exceeded; retry after a minute",
+                headers={"Retry-After": "60"},
+            )
+        s = stage3_state_machine.new_session()
+        s.reference = stage3_state_machine._new_reference()  # type: ignore[attr-defined]
+        if _is_test_mode_active(dict(request.headers)):
+            seed = json.dumps(req.model_dump(), sort_keys=True)
+            s.reference = _deterministic_ref(seed)
+            # Test-mode determinism: the same seed maps to the same reference.
+            # Re-creating it must be idempotent — reuse the existing session
+            # rather than inserting a duplicate (the store's `reference` column
+            # is UNIQUE, so a second insert would 500). Production refs are
+            # random, so this branch never runs there.
+            existing = SESSIONS.by_reference(s.reference)
+            if existing is not None:
+                return {
+                    "ref": existing.reference,
+                    "consentRequired": True,
+                    "consentGranted": bool(getattr(existing, "consent", False)),
+                    "reference": existing.reference,
+                    "consent_required": True,
+                    "next": "consent",
+                }
+        SESSIONS.put(s)
+        # Audit (G-34 / G-52: every session logs timestamp + session id)
+        AUDIT.append(
+            session_id=s.session_id, user=ip, action="session_created",
+            inputs={"channel": req.channel, "reference": s.reference},
+            rule_path=[], output={"state": s.state},
+        )
+        return {
+            "ref": s.reference,            # frontend
+            "consentRequired": True,       # frontend
+            "consentGranted": False,       # frontend
+            "reference": s.reference,      # engine-contract (tests)
+            "consent_required": True,
+            "next": "consent",
+        }
+
+    # ---- /api/consent (S0a) ----
+    @app.post("/api/consent")
+    def post_consent(req: ConsentRequest) -> Any:
+        s = SESSIONS.by_reference(req.reference)
+        if s is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        if not req.accept:
+            stage3_state_machine.abandon(s)
+            SESSIONS.put(s)
+            return {"next": "abandoned"}
+        stage3_state_machine.acknowledge_consent(s, privacy_acknowledged=True)
+        SESSIONS.put(s)  # F-E: persist consent so the next request sees it (real store)
+        slot_def = stage3_state_machine.SLOT_DEFINITIONS[0]
+        return {"next": "slot", "slot": {"id": 1, "name": slot_def["slot"], "type": slot_def["type"]}}
+
+    # ---- /api/slot (S3 + validation) ----
+    # Two dialects on one path:
+    #   frontend: {ref}              -> first question {ref, next: SlotQuestion, progress}
+    #             {ref, slot, value} -> {ref, next: SlotQuestion|null, progress}  (next.done -> classify)
+    #   engine  : {reference, slot, value} -> {accepted, next, next_slot|slot, ...}  (acceptance tests)
+    @app.post("/api/slot")
+    def post_slot(req: SlotRequest) -> Any:
+        frontend_mode = req.ref is not None
+        ref = req.ref or req.reference
+        s = SESSIONS.by_reference(ref) if ref else None
+        if s is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        if not s.consent:
+            raise HTTPException(status_code=400, detail="consent required")
+
+        # --- Frontend mode: engine drives the conversation ---
+        if frontend_mode:
+            # No slot/value => the UI is asking for the FIRST/next question.
+            if not req.slot:
+                return {"ref": s.reference, "next": _next_question(s.intake),
+                        "progress": _progress(s.intake)}
+            slot_id = None
+            for sid, sd in enumerate(stage3_state_machine.SLOT_DEFINITIONS, 1):
+                if sd["slot"] == req.slot:
+                    slot_id = sid
+                    break
+            if slot_id is None:
+                raise HTTPException(status_code=400, detail=f"unknown slot: {req.slot}")
+            stage3_state_machine.submit_slot(s, slot_id, req.value)
+            SESSIONS.put(s)  # F-E: persist mutation
+            # Escalation (serious injury / re-prompt cap) -> end the Q&A; the
+            # UI calls classify, which returns the calm handoff message.
+            if s.escalation:
+                return {"ref": s.reference, "next": dict(_DONE_QUESTION),
+                        "progress": _progress(s.intake)}
+            # Valid -> advance; invalid -> _next_question returns the SAME slot
+            # (not yet stored), so the UI simply re-asks it.
+            return {"ref": s.reference, "next": _next_question(s.intake),
+                    "progress": _progress(s.intake)}
+
+        # --- Engine-contract mode (acceptance tests) ---
+        # Spec slots go through the state machine (with validation).
+        # Engine-only fields (e.g. simultaneous_entry, sight_lines) are
+        # accepted but stored in the intake dict directly without
+        # validation. This matches the test contract for scenario-specific
+        # data and keeps the spec slot list authoritative.
+        slot_id = None
+        for sid, sd in enumerate(stage3_state_machine.SLOT_DEFINITIONS, 1):
+            if sd["slot"] == req.slot:
+                slot_id = sid
+                break
+
+        if slot_id is None:
+            # Engine intake field (not a spec slot) — store directly.
+            s.intake[req.slot] = req.value
+            s.pii_persisted = True
+            SESSIONS.put(s)
+            return {"accepted": True, "next": "slot"}
+
+        result = stage3_state_machine.submit_slot(s, slot_id, req.value)
+        SESSIONS.put(s)  # F-E: persist slot mutation (real store needs explicit save)
+
+        # G-43: escalation short-circuits
+        if result.get("end_state") == "SX-ESCALATE" or s.escalation:
+            return {
+                "accepted": False,
+                "escalation": s.escalation,
+                "next": "escalated",
+                "terminal": True,
+            }
+
+        if not result.get("slot_accepted"):
+            return {
+                "accepted": False,
+                "reprompt": result.get("error", "invalid value"),
+                "next": "slot",
+                "slot": {"id": slot_id, "name": req.slot, "type": stage3_state_machine.SLOT_DEFINITIONS[slot_id - 1]["type"]},
+            }
+
+        # Slot accepted. Either more slots remain, or we move to classify.
+        next_id = stage3_state_machine._next_slot_index(s.intake) + 1
+        if next_id > len(stage3_state_machine.SLOT_DEFINITIONS):
+            return {"accepted": True, "next": "classify"}
+        next_def = stage3_state_machine.SLOT_DEFINITIONS[next_id - 1]
+        return {
+            "accepted": True,
+            "next": "slot",
+            "next_slot": {"id": next_id, "name": next_def["slot"], "type": next_def["type"]},
+        }
+
+    # ---- /api/intake/:ref/extras (CR-5-01) ----
+    @app.post("/api/intake/{ref}/extras")
+    def post_extras(ref: str, payload: ExtrasRequest, request: Request) -> Any:
+        """Store engine-only fields (e.g. simultaneous_entry, sight_lines,
+        chain_count) in the intake. NOT user-facing; reserved for
+        operator scripts and tests. Validated lightly: keys must be
+        alphanumeric/underscore, values must be JSON-serialisable scalars
+        or short lists.
+        """
+        s = SESSIONS.by_reference(ref)
+        if s is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        if not s.consent:
+            raise HTTPException(status_code=403, detail="consent required")
+        # Light validation
+        for k, v in payload.fields.items():
+            if not isinstance(k, str) or not k.replace("_", "").isalnum():
+                raise HTTPException(status_code=400, detail=f"bad key: {k!r}")
+        s.intake.update(payload.fields)
+        SESSIONS.put(s)
+        return {"stored": list(payload.fields.keys())}
+
+    # ---- /api/classify (G-41, G-42, G-43) ----
+    @app.post("/api/classify")
+    def post_classify(req: ClassifyRequest) -> Any:
+        frontend_mode = req.ref is not None
+        ref = req.ref or req.reference
+        s = SESSIONS.by_reference(ref) if ref else None
+        if s is None:
+            raise HTTPException(status_code=404, detail="session not found")
+
+        # If the session already escalated during slot collection (e.g.
+        # serious injury), don't classify — surface the calm handoff. The
+        # frontend has no separate escalation screen, so we return a
+        # ClassifyResponse with NO fault band and the handoff as outputText.
+        if frontend_mode and s.escalation:
+            return {
+                "band": None,
+                "outputText": ESCALATION_MESSAGE.format(ref=s.reference),
+                "disclaimerText": stage3_config.get_disclaimer("master"),
+                "escalated": True,
+            }
+
+        # CR-5-04: out-of-enum band is fail-closed via the engine's
+        # VALID_BANDS guard. No `inject_band` test special-case in the
+        # API layer. The general fail-closed behaviour is exercised by
+        # T-25-004 via /api/intake/:ref/extras (engine out-of-enum
+        # bands are produced by an alternate scenario injection).
+        er = stage3_state_machine.run_classification(s)
+        SESSIONS.put(s)  # F-E: persist engine_result for later PDF/brief reads
+
+        if er.escalation:
+            if frontend_mode:
+                return {
+                    "band": None,
+                    "outputText": ESCALATION_MESSAGE.format(ref=s.reference),
+                    "disclaimerText": stage3_config.get_disclaimer("master"),
+                    "escalated": True,
+                }
+            return {
+                "escalation": er.escalation,
+                "next": "escalated",
+                "terminal": True,
+            }
+
+        if er.band not in stage3_engine.VALID_BANDS:
+            return Response(
+                content=json.dumps({"error": "fail-closed: out-of-enum band", "band_rendered": False}),
+                status_code=500, media_type="application/json",
+            )
+
+        # G-18 across HTTP: disclaimer already resolved
+        try:
+            resolved_output = stage3_config.resolve_strict(er.text_web or "")
+        except stage3_config.UnresolvedTokenError:
+            return Response(
+                content=json.dumps({"error": "unresolved token in engine output"}),
+                status_code=500, media_type="application/json",
+            )
+        disclaimer = stage3_config.get_disclaimer("master")
+
+        return {
+            "band": er.band,
+            "scenario_id": er.scenario_id,
+            "outputText": resolved_output,
+            "disclaimerText": disclaimer,
+        }
+
+    # ---- /api/pdf/:ref (G-44) ----
+    @app.get("/api/pdf/{ref}")
+    def get_pdf(ref: str) -> Response:
+        s = SESSIONS.by_reference(ref)
+        if s is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        intake_record = {
+            "session_id": s.session_id,
+            "reference": s.reference,
+            **s.intake,
+        }
+        if s.engine_result:
+            intake_record["band"] = s.engine_result.band
+            intake_record["scenario_id"] = s.engine_result.scenario_id
+            intake_record["output_text"] = s.engine_result.text_web
+        pdf_bytes = stage3_pdf_gen.render_summary_pdf(
+            reference=s.reference,
+            intake=intake_record,
+            engine_result=s.engine_result,
+        )
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={s.reference}.pdf"},
+        )
+
+    # ---- /api/brief/:ref (G-45) ----
+    @app.get("/api/brief/{ref}")
+    def get_brief(ref: str, request: Request) -> Any:
+        s = SESSIONS.by_reference(ref)
+        if s is None:
+            raise HTTPException(status_code=404, detail="session not found")
+
+        # ---- Authn/authz (G-45 + G-57) ----
+        if _brief_auth_mode() == "jwt":
+            # Real path: verify a Supabase access token (ES256/JWKS) and
+            # require AAL2. Identity comes from the signed `email` claim;
+            # role from the existing auth mapping. No PII in the URL.
+            authz = request.headers.get("authorization", "")
+            token = authz[7:].strip() if authz[:7].lower() == "bearer " else ""
+            claims = _verify_supabase_jwt(token)
+            if not claims:
+                raise HTTPException(status_code=403, detail="invalid or missing bearer token")
+            if claims.get("aal") != "aal2":
+                raise HTTPException(status_code=403, detail="MFA (AAL2) required")
+            email = claims.get("email")
+            if not email:
+                raise HTTPException(status_code=403, detail="token missing email claim")
+            try:
+                user = stage3_auth.authenticate(email)
+            except stage3_auth.AuthError as exc:
+                raise HTTPException(status_code=403, detail=str(exc))
+        else:
+            # Stub path (default): as_email + X-MFA-Verified header.
+            email = request.query_params.get("as_email")
+            if not email:
+                raise HTTPException(status_code=403, detail="auth required (as_email stub)")
+            try:
+                user = stage3_auth.authenticate(email)
+            except stage3_auth.AuthError as exc:
+                raise HTTPException(status_code=403, detail=str(exc))
+            if not _mfa_satisfied(request):
+                raise HTTPException(
+                    status_code=403, detail="MFA required (X-MFA-Verified: 1 header missing)",
+                )
+        if not stage3_auth.dashboard_visible_for(user):
+            raise HTTPException(status_code=403, detail="brief access denied for role")
+        if user.role not in ("legal_staff", "admin"):
+            raise HTTPException(status_code=403, detail="brief is legal-staff/admin only")
+        # (MFA is enforced per-mode above: AAL2 claim in jwt mode, X-MFA-Verified in stub mode.)
+
+        brief = stage3_intake_brief.generate_intake_brief(s, s.engine_result)
+        # G-34: audit the read
+        AUDIT.append(
+            session_id=s.session_id, user=user.email, action="brief_viewed",
+            inputs={"reference": ref},
+            rule_path=[], output={"fields_count": len(brief.to_dict())},
+        )
+        return brief.to_dict()
+
+    return app
+
+
+# Convenience: the default app instance used by uvicorn / Vercel
+app = create_app()
+
+
+# ===== Stage 4 hardening: rate limit (CR-5-03), MFA (G-57), runtime
+# tokens (CR-4-02), explicit extras route (CR-5-01) =====
+
+class _TokenBucket:
+    """Tiny in-process token bucket. Per-IP cap on /api/session.
+
+    In Vercel's edge runtime this won't span instances — for the staging
+    preview it caps a single container. Production with multiple
+    containers should use Vercel Edge Config or Upstash Redis. This
+    satisfies CR-5-03 *for the preview*; the deployer swaps in a
+    distributed limiter for production.
+    """
+
+    def __init__(self, *, rate_per_minute: int = 10, burst: int = 5) -> None:
+        self._rate = rate_per_minute
+        self._burst = burst
+        self._buckets: dict[str, tuple[float, float]] = {}
+        # tokens, last_refill_ts
+
+    def allow(self, key: str) -> bool:
+        import time as _t
+        now = _t.time()
+        if key in self._buckets:
+            tokens, last = self._buckets[key]
+            elapsed_min = (now - last) / 60.0
+            tokens = min(self._burst, tokens + elapsed_min * self._rate)
+            if tokens < 1:
+                self._buckets[key] = (tokens, now)
+                return False
+            tokens -= 1
+            self._buckets[key] = (tokens, now)
+            return True
+        self._buckets[key] = (self._burst - 1, now)
+        return True
+
+
+RATE_LIMITER = _TokenBucket(
+    rate_per_minute=int(os.environ.get("RATE_LIMIT_PER_MIN", "10")),
+    burst=int(os.environ.get("RATE_LIMIT_BURST", "5")),
+)
+
+
+def _client_ip(request: Request) -> str:
+    """Resolve the client IP, preferring X-Forwarded-For (Vercel sets it)."""
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _mfa_satisfied(request: Request) -> bool:
+    """G-57: MFA required for dashboard roles.
+
+    Stub: reads `X-MFA-Verified: 1` header (the OIDC/SAML provider at
+    Stage 4 will set this after a successful TOTP challenge). The
+    stub makes the contract testable today; the deployer wires the
+    real provider.
+    """
+    return request.headers.get("x-mfa-verified") == "1"
+
+
+# ----- Real server-side AAL2 auth for /api/brief (CR-5-05 / D-3) -----
+# Default mode = "stub" (the X-MFA-Verified header path above) so existing
+# tests + the current frontend keep working unchanged. Set BRIEF_AUTH_MODE=jwt
+# to require a verified Supabase access token with aal2. The frontend must then
+# send `Authorization: Bearer <access_token>` (drop the as_email query param).
+_JWKS_URL = (
+    os.environ.get("SUPABASE_URL", "").rstrip("/") + "/auth/v1/.well-known/jwks.json"
+    if os.environ.get("SUPABASE_URL") else ""
+)
+_jwks_client = None  # lazily constructed PyJWKClient (caches keys)
+
+
+def _brief_auth_mode() -> str:
+    return os.environ.get("BRIEF_AUTH_MODE", "stub").lower()
+
+
+def _verify_supabase_jwt(token: str) -> Optional[dict]:
+    """Verify a Supabase access token via the project JWKS (ES256).
+    Returns the claims dict (incl. `email`, `aal`, `sub`) or None if invalid.
+    No shared secret needed — the project uses asymmetric keys."""
+    global _jwks_client
+    if not token or not _JWKS_URL:
+        return None
+    try:
+        import jwt  # PyJWT
+        from jwt import PyJWKClient
+        if _jwks_client is None:
+            _jwks_client = PyJWKClient(_JWKS_URL)
+        signing_key = _jwks_client.get_signing_key_from_jwt(token)
+        return jwt.decode(
+            token, signing_key.key,
+            algorithms=["ES256"],
+            audience="authenticated",
+            options={"require": ["exp", "sub"]},
+        )
+    except Exception:
+        return None

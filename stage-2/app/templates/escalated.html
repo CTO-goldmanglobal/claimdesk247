@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Routed to a lawyer{% endblock %}
+{% block content %}
+<h1>I've passed this to a lawyer</h1>
+<div class="disclaimer">
+  <p>{{ handoff_text }}</p>
+</div>
+<div class="chat">
+  <div class="label">Alex (AI assistant)</div>
+  <p>Your reference is <span class="ref">{{ reference }}</span>. A lawyer from Goldman Forge Legal will be in touch.</p>
+</div>
+<p style="font-size: 0.85rem; color: #4a5568;">This conversation is general information, not legal advice.</p>
+{% endblock %}
