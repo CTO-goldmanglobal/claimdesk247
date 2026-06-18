@@ -85,3 +85,32 @@ Today the brief is behind a *stub* (`?as_email=` + `X-MFA-Verified` header — b
 3. **Roll out flag-gated** (`BRIEF_AUTH_MODE=jwt`, default `stub`) so deploy is zero behaviour-change until a **real staff token** (exists only after D-2) validates the full path. *Why this waits:* shipping untested auth-verification to a legal product is a material risk — it is sequenced after D-2 so it can be tested, not blind-deployed.
 
 **Net:** every gate that can be closed without external action is closed or evidenced. The remaining path to loop-close = CTO does D-2/D-4/D-7-apply/D-9 + firm gives D-8 → Fables runs the scored suite, builds+tests D-3, refreshes the sign-off package → Council approves D-10.
+
+---
+
+## D-11 — Repo visibility mismatch + PAT decision (added 2026-06-18)
+
+**Context discovered during the workspace brand-tree push:**
+- `CTO-goldmanglobal/claimdesk247-engine` → **private** ✅
+- `CTO-goldmanglobal/claimdesk247` (workspace brand tree) → **PUBLIC** 🚨
+
+The CTO's stated intent: "don't change PAT, only sole developer, project are private" — but the workspace repo is in fact public. This is a discrepancy between the CTO's mental model and the GitHub config.
+
+**Risk if the workspace repo stays public with the current PAT:**
+- The commit history of the public repo is browseable
+- The PAT is currently in chat transcripts (this session, prior sessions) and the build seat has run scripts that echo it during diagnostics
+- If the PAT has `repo` scope, anyone with the PAT could push to claimdesk247 (the public one) and claimdesk247-engine (the private one — if the PAT also has access to it, which it does because the user is the owner of both)
+- A leaked PAT in this session was committed to a public repo and blocked by GitHub secret scanning; a subsequent attempt at push with a re-issued PAT also landed in the chat transcript
+
+**Decision (CTO, deferred):**
+- **[ ] (a) Rotate the current PAT on github.com** — the leak surface is real even if the threat model is "just me" because the PAT is in a long-lived JSONL transcript.
+- **[ ] (b) Make the workspace repo private** — `gh repo edit CTO-goldmanglobal/claimdesk247 --visibility private` (or via the github.com UI: Settings → Danger Zone → Change repository visibility). This eliminates the public-repo risk class entirely.
+- **[ ] (c) Do both (a) and (b)** — defense in depth. Recommended.
+- **[ ] (d) Do nothing** — accept that the PAT is in transcripts; the threat actor is "anyone who can read these transcripts" (probably nobody); the public repo accepts that the brand-tree contents (handoff docs, etc.) are public.
+
+**Why this is recorded here:** the CTO said "sole developer, private repos" — that's the intended posture. The actual current state has a public repo. Closing the gap between intent and state is a loop-close item. *CTO decides when to act.*
+
+**Build seat constraints when this is decided:**
+- If (a) is chosen: build seat continues to read PAT from `~/.git-credentials` (no change to the wrapper script flow). The PAT will be different; the script reads whatever is in the file at push time.
+- If (b) is chosen: build seat can return to the standard `git push origin <branch>` flow (the osxkeychain override issue still exists; the wrapper script remains the safest option, but the keychain cleanup we did already made plain `git push` work too).
+- If (d) is chosen: no action. Document the accepted risk in `CTO-ACTION-PAT-RESCOPE.md` under a new "Accepted risk" section.
