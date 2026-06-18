@@ -103,10 +103,10 @@ The CTO's stated intent: "don't change PAT, only sole developer, project are pri
 - A leaked PAT in this session was committed to a public repo and blocked by GitHub secret scanning; a subsequent attempt at push with a re-issued PAT also landed in the chat transcript
 
 **Decision (CTO, deferred):**
-- **[ ] (a) Rotate the current PAT on github.com** — the leak surface is real even if the threat model is "just me" because the PAT is in a long-lived JSONL transcript.
-- **[ ] (b) Make the workspace repo private** — `gh repo edit CTO-goldmanglobal/claimdesk247 --visibility private` (or via the github.com UI: Settings → Danger Zone → Change repository visibility). This eliminates the public-repo risk class entirely.
-- **[ ] (c) Do both (a) and (b)** — defense in depth. Recommended.
-- **[ ] (d) Do nothing** — accept that the PAT is in transcripts; the threat actor is "anyone who can read these transcripts" (probably nobody); the public repo accepts that the brand-tree contents (handoff docs, etc.) are public.
+- **[x] (a) Rotate the current PAT on github.com** — the leak surface is real even if the threat model is "just me" because the PAT is in a long-lived JSONL transcript. **DONE 2026-06-18 ~12:11 AEST (CTO).**
+- **[ ] (b) Make the workspace repo private** — `gh repo edit CTO-goldmanglobal/claimdesk247 --visibility private` (or via the github.com UI: Settings → Danger Zone → Change repository visibility). This eliminates the public-repo risk class entirely. **DEFERRED** — the CTO will revisit this later; rotation alone is accepted for now.
+- **[ ] (c) Do both (a) and (b)** — defense in depth. Recommended. **Superseded by (a).**
+- **[ ] (d) Do nothing** — accept that the PAT is in transcripts; the threat actor is "anyone who can read these transcripts" (probably nobody); the public repo accepts that the brand-tree contents (handoff docs, etc.) are public. **Superseded by (a).**
 
 **Why this is recorded here:** the CTO said "sole developer, private repos" — that's the intended posture. The actual current state has a public repo. Closing the gap between intent and state is a loop-close item. *CTO decides when to act.*
 
