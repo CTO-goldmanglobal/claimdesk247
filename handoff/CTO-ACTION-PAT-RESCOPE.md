@@ -60,6 +60,52 @@ git push https://x-access-token:<PAT>@github.com/CTO-goldmanglobal/claimdesk247.
 - **Never paste a PAT into chat or commit it to a tracked file.** GitHub's secret scanning will block the push AND the PAT is already in the git object database even if the push is later rewritten.
 - **Fine-grained PATs require two independent permissions** (repository access + action permission). API and git daemon enforce them differently.
 - **For local git operations requiring a PAT, prefer `~/.git-credentials` (file mode 0600) over `.git/config` URL rewrites.** The latter makes the PAT visible in any tool that dumps git config.
+- **Never `cat` or `head` a credential file from inside a build seat.** Even if the file is in a "safe" location like `~/.git-credentials`, the build seat's output flows into the chat transcript. The 2026-06-18 incident below is a direct consequence of this rule being broken.
+
+## Incident 3 — 2026-06-18 ~11:00 AEST: build seat `cat` of `~/.git-credentials`
+
+### What happened
+
+While verifying the freshly-stored new PAT, the build seat ran `cat ~/.git-credentials` to confirm the file contents. The file contained two distinct PATs on three lines (see "What was actually in the file" below). The PAT values landed in the chat transcript. **Both PATs are now considered compromised and require rotation.**
+
+### What was actually in the file
+
+The user had pasted the new PAT into `~/.git-credentials`, but the file also contained:
+1. A pre-existing `https://CTO-goldmanglobal:<OLD_PAT>@github.com/CTO-goldmanglobal/claimdesk247.git` line (path-suffixed — git's credential helper doesn't expect paths)
+2. A pre-existing `https://CTO-goldmanglobal:<OLD_PAT>@github.com/CTO-goldmanglobal/claimdesk247-engine.git` line (also path-suffixed)
+3. The new line the user had just pasted: `github_pat_<NEW_PAT>` (missing the `https://<user>:<pat>@host` wrapper — not a valid credential line)
+
+**Root cause:** the file had not been wiped before the new PAT was pasted. The malformed lines came from previous testing / forgotten scratch work.
+
+### Containment (done)
+
+- File was wiped: `> ~/.git-credentials` and re-created with a single placeholder line in the correct format: `https://x-access-token:REPLACE_ME_ON_NEXT_ROTATION@github.com`
+- File mode confirmed: `0600`
+- A short-lived backup (`~/.git-credentials.bad-2026-06-18`) was created and then `rm`'d immediately, to avoid leaving a second copy of the leaked PATs on disk
+- Both repos' `.git/config` URL-rewrite blocks (which also embedded PATs) were removed. `git remote -v` is now clean in both repos.
+- See `handoff/PAT-STORAGE-HOWTO.md` (engine repo) for the correct procedure.
+
+### Recovery (for the CTO)
+
+1. **Rotate the new PAT** on github.com — even though the placeholder is in the file now, the actual PAT that was in there is compromised. Generate a fresh one.
+2. **Edit `~/.git-credentials`** with the new PAT. The file should contain **exactly one line** in this format:
+   ```
+   https://x-access-token:<NEW_PAT>@github.com
+   ```
+3. **Do not paste the new PAT in chat.** Use `nano ~/.git-credentials` in a Terminal outside Cursor.
+4. **Verify** by running `git fetch origin` in either repo. The fetch should succeed with no prompt.
+
+### Prevention (rule going forward)
+
+- The build seat will never again `cat`, `head`, `tail`, `less`, or otherwise read a credential file. Verification will be done by attempting a fetch and reading the exit code, or by parsing a redacted form of the file via `sed -E 's|github_pat_[A-Za-z0-9_]+|github_pat_<REDACTED>|g'`.
+- The CTO will paste new PATs directly into `nano ~/.git-credentials` from a Terminal outside Cursor, never from the chat input box.
+- This incident has been added to the audit log; the audit log will be reviewed at the next integration audit cycle.
+
+### Cross-references
+
+- `handoff/PAT-STORAGE-HOWTO.md` (engine repo) — the correct procedure
+- `handoff/INTEGRATION-AUDIT-2026-06-18.md` (P0 #3) — the original PAT-scope blocker
+- `handoff/CEO-REPORT-INTEGRATION-2026-06-18.md` — CEO summary of the broader incident
 
 ---
 
