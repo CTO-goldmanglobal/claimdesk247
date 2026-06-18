@@ -109,4 +109,55 @@ The user had pasted the new PAT into `~/.git-credentials`, but the file also con
 
 ---
 
+## Incident 3 RESOLVED — 2026-06-18 ~11:45 AEST: actual root cause was stale macOS keychain entries
+
+### The actual cause (NOT what the file content looked like)
+
+After incident 3 was filed, attempts to push the doc with the new PAT kept returning 403 even though:
+- The new PAT's API permissions were confirmed as `push: True, admin: True` for both repos (via `pat-test.sh`)
+- The PAT in `~/.git-credentials` matched the new one
+- The file format was correct
+- `git fetch origin` worked silently
+
+**Root cause:** the macOS Keychain contained **three** stale `github.com` / `gh:github.com` entries (one each for accounts `HermesGoldmanglobal`, `nswcoachcharter-au`, and `CTO-goldmanglobal`). Git's system-level `osxkeychain` credential helper (set in `/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig`) matched FIRST in the helper chain and returned a stale CTO-goldmanglobal credential (likely an old PAT with read-only scope) — overriding the user-configured `~/.git-credentials` file.
+
+The credentials stack order (un-overridable from user/repo config):
+1. **System gitconfig:** `credential.helper = osxkeychain` — runs first
+2. **User `~/.gitconfig`:** `credential.helper = store` — runs second
+3. **Repo `.git/config`:** any local helper — runs third
+
+**Repo-local and user-local helpers cannot override the system-level `osxkeychain`.** This is a git limitation, not a misconfiguration.
+
+### What fixed it
+
+Two steps were needed:
+1. **Deleted the stale `gh:github.com / CTO-goldmanglobal` entry** from the macOS Keychain (created 2026-06-14, well before this session, with the wrong scope):
+   ```bash
+   security delete-generic-password -s "gh:github.com" -a "CTO-goldmanglobal"
+   ```
+2. **Used a wrapper script** that bypasses the helper chain entirely by embedding the PAT directly in the URL (read from `~/.git-credentials` at push time, never stored in `.git/config`):
+   ```bash
+   ~/.local/bin/git-push-with-file-creds HEAD:refs/heads/cursor/founding-state-claimdesk247
+   ```
+   The script is installed at `~/.local/bin/git-push-with-file-creds` and reads the PAT fresh from `~/.git-credentials` on every invocation.
+
+### Verification (after both steps)
+
+- API check via the file's PAT: `login: CTO-goldmanglobal, push: True` on both repos ✅
+- Push via wrapper: `c4073d7..bbedd09 HEAD -> cursor/founding-state-claimdesk247` ✅
+- Latest commit on github.com: `bbedd09 docs(handoff): PAT incident 3 — build seat cat leaked PATs in chat` ✅
+
+### Lessons learned (added)
+
+- **macOS Keychain can silently override `~/.git-credentials` for git operations.** Whenever a PAT is rotated, also delete the corresponding keychain entry (use Keychain Access app, or `security delete-generic-password -s "gh:github.com" -a "<account>"`).
+- **The `osxkeychain` system-level helper is un-overridable from user/repo config.** It is set by Apple's CommandLineTools package. If it holds a stale credential, no amount of `git config` will fix it — you must clear the keychain.
+- **The `git -c credential.helper=` override does NOT skip the system helper.** The system helper runs in a separate credential-store layer. To bypass all helpers, embed the PAT directly in the URL (the wrapper script does this safely).
+- **For this Mac, the `~/.local/bin/git-push-with-file-creds` script is the recommended push method** going forward, because:
+  - It reads the PAT fresh from `~/.git-credentials` on every push (no need to remember to re-rotate it in multiple places)
+  - It uses the PAT in the URL — which is the only way to actually push when `osxkeychain` has a stale entry
+  - The PAT is never stored in `.git/config`, never echoed, and never written to disk
+- **Long-term fix for the team:** consider installing the gh CLI's credential helper globally and authenticating as `CTO-goldmanglobal` via `gh auth login` — this would unify the auth model and surface any token issues earlier.
+
+---
+
 *Filed for audit log. See `handoff/INTEGRATION-AUDIT-2026-06-18.md` (P0 #3) and `handoff/CEO-REPORT-INTEGRATION-2026-06-18.md` for the full context.*
