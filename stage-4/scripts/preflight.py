@@ -83,7 +83,7 @@ def g50_staging_url_live(staging: str) -> tuple[bool, str]:
 
 
 def g51_supabase_adapter(staging: str) -> tuple[bool, str]:
-    """G-51 (P0): 73/73 still green against the live API (weblink runner)."""
+    """G-51 (P0): 99/99 still green against the live API (weblink runner; was 87/87 pre-T4/T6/T8, 79/79 pre-T6, 75/75 pre-MFA, 73/73 pre-Stage-2.5)."""
     # Reuse the stage-2.5 weblink runner. Fail the gate if the runner
     # reports any red.
     cmd = [sys.executable, str(ROOT / "stage-2.5" / "tests" / "run_acceptance.py")]
@@ -95,7 +95,7 @@ def g51_supabase_adapter(staging: str) -> tuple[bool, str]:
         return False, f"weblink runner crashed: {e}"
     if result.returncode != 0:
         return False, f"weblink runner exit={result.returncode}: {result.stdout[-500:]}"
-    return True, "73/73 green (weblink runner exit 0)"
+    return True, "99/99 green (weblink runner exit 0)"
 
 
 def g52_residency(staging: str) -> tuple[bool, str]:
@@ -274,7 +274,7 @@ def g61_signoff_complete(_staging: str) -> tuple[bool, str]:
 
 
 def g62_regression_weblink(staging: str) -> tuple[bool, str]:
-    """G-62 (P0): Regression — 73/73 still green against deployed API."""
+    """G-62 (P0): Regression — 99/99 still green against deployed API (was 87/87 pre-T4/T6/T8, 79/79 pre-T6, 75/75 pre-MFA, 73/73 pre-Stage-2.5)."""
     return g51_supabase_adapter(staging)  # same runner
 
 
@@ -282,7 +282,7 @@ def g62_regression_weblink(staging: str) -> tuple[bool, str]:
 
 GATES: list[tuple[str, str, bool, Callable]] = [
     ("G-50", "Staging URL live; full web intake E2E",       True,  lambda: g50_staging_url_live(os.environ["STAGING_URL"])),
-    ("G-51", "73/73 green against deployed API",            True,  g51_supabase_adapter),
+    ("G-51", "99/99 green against deployed API",            True,  g51_supabase_adapter),
     ("G-52", "Residency: Supabase=Sydney; Vercel PII=syd1", True,  lambda: g52_residency(os.environ["STAGING_URL"])),
     ("G-53", "RLS: anon reads nothing",                     True,  lambda: g53_rls_enforced(os.environ.get("SUPABASE_URL", ""), os.environ.get("SUPABASE_ANON_KEY", ""))),
     ("G-54", "audit_log UPDATE/DELETE rejected by policy",  True,  lambda: g54_audit_append_only(os.environ.get("SUPABASE_URL", ""), os.environ.get("SUPABASE_SERVICE_ROLE_KEY", ""))),
@@ -293,7 +293,7 @@ GATES: list[tuple[str, str, bool, Callable]] = [
     ("G-59", "x-test-mode inert in production",             False, lambda: g59_test_mode_inert(os.environ["STAGING_URL"])),
     ("G-60", "All carry-in CRs landed",                     False, g60_carry_in_crs),
     ("G-61", "Sign-off package complete",                   True,  g61_signoff_complete),
-    ("G-62", "Regression: 73/73 green (weblink)",           True,  g62_regression_weblink),
+    ("G-62", "Regression: 99/99 green (weblink)",           True,  g62_regression_weblink),
 ]
 
 

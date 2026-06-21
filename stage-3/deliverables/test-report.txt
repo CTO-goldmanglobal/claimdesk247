@@ -1,5 +1,5 @@
 STAGE 3 ACCEPTANCE TEST REPORT
-Generated: 2026-06-14T16:41:49.209704Z
+Generated: 2026-06-21T04:42:29.312094Z
 Suite: acceptance-tests.stage3.yaml
 Stage 2 regression suite: /Users/finn/Smash repair Engine/stage-2/acceptance-tests.stage2.yaml
 
@@ -17,12 +17,12 @@ Stage 2 regression suite: /Users/finn/Smash repair Engine/stage-2/acceptance-tes
 [PASS] T-3-011   gate=G-40   confirm-back prompted for user_vehicle (and 2 total confirm turns)
 [PASS] T-3-012   gate=G-40   re-prompt cap hit, callback offered (no dead-end)
 [PASS] T-3-013   gate=G-35   advise_000=True reason='fuel_leak'
-[PASS] T-3-014   gate=G-35   tow ref=TOW-486A4C, all slots captured, logged
+[PASS] T-3-014   gate=G-35   tow ref=TOW-1876C2, all slots captured, logged
 [PASS] T-3-015   gate=G-35   rental explainer is general-info; no forbidden phrase
-[PASS] T-3-016   gate=G-35   rental ref=REN-B3853E, slots captured, noted
+[PASS] T-3-016   gate=G-35   rental ref=REN-A8E06C, slots captured, noted
 [PASS] T-3-017   gate=G-38   parking -> s5-reversing (CR-3-01 applied)
 [PASS] T-3-018   gate=G-38   free text rejected with reprompt (CR-3-02)
-[PASS] T-3-019   gate=G-38   version=3.0.0 out_of_enum_bands=0
+[PASS] T-3-019   gate=G-38   version=3.1.0 out_of_enum_bands=0
 [PASS] T-3-020   gate=G-33   role=customer -> 403 (server-side enforced)
 [PASS] T-3-021   gate=G-33   role=anonymous -> 403 (server-side enforced)
 [PASS] T-3-022   gate=G-33   role=panel_shop_staff -> 200 (granted)
@@ -31,11 +31,30 @@ Stage 2 regression suite: /Users/finn/Smash repair Engine/stage-2/acceptance-tes
 [PASS] T-3-025   gate=G-34   admin export ok: 1 entries
 [PASS] T-3-026   gate=G-36   brief has all 8 fields, customer_facing=False, no fault %
 [PASS] T-3-027   gate=G-39   stage2: 30/30 green (regression intact)
-[PASS] T-1-01    gate=G-PROD-LOCK  signed scenario -> band=likely (hash match: 1ddabeb5c441...)
+[PASS] T-1-01    gate=G-PROD-LOCK  signed scenario -> band=likely (hash match: 3964e668d905...)
 [PASS] T-1-02    gate=G-PROD-LOCK  unsigned scenario -> escalation=unsigned-scenario (G-PROD-LOCK)
 [PASS] T-1-03    gate=G-VER  stale-signoff correctly detected (G-VER); live unsigned scenario also escalated as unsigned-scenario
-[PASS] T-1-04    gate=G-VER  hash deterministic; legal_signoff stripped; len=64; h=1ddabeb5c441...
+[PASS] T-1-04    gate=G-VER  hash deterministic; legal_signoff stripped; len=64; h=3964e668d905...
+[PASS] T-6-01    gate=G-T6   start -> s1-q1 (user_position); total=3
+[PASS] T-6-02    gate=G-T6   q1 accepted -> next s1-q2
+[PASS] T-6-03    gate=G-T6   all answered; ready_to_classify; scenario slots in intake
+[PASS] T-6-04    gate=G-T6   invalid value -> reprompt_count=1
+[PASS] T-6-05    gate=G-T6   reprompt cap -> SX-ESCALATE + reference
+[PASS] T-6-06    gate=G-T6   integer type: rejects non-int, accepts int
+[PASS] T-6-07    gate=G-T6   no scenario -> straight to classify (no questions)
+[PASS] T-7-01    gate=G-T4   s7-car-park -> likely
+[PASS] T-7-02    gate=G-T4   s7-car-park -> unclear
+[PASS] T-7-03    gate=G-T4   s8-signalised-intersection -> likely
+[PASS] T-7-04    gate=G-T4   s8-signalised-intersection -> unclear
+[PASS] T-7-05    gate=G-T4   s9-right-turn-oncoming -> likely
+[PASS] T-7-06    gate=G-T4   s9-right-turn-oncoming -> unclear
+[PASS] T-7-07    gate=G-T4   s10-sideswipe-same-direction -> likely
+[PASS] T-7-08    gate=G-T4   s10-sideswipe-same-direction -> unclear
+[PASS] T-7-09    gate=G-T4   s11-parked-vehicle -> likely
+[PASS] T-7-10    gate=G-T4   s11-parked-vehicle -> possible
+[PASS] T-8-01    gate=G-21   outside_nsw -> callback + reference
+[PASS] T-8-02    gate=G-T6   not_listed -> callback + reference
 ================================================================================
-TOTAL: 31  PASS: 31  FAIL: 0
+TOTAL: 50  PASS: 50  FAIL: 0
 
 All tests green. Report written to /Users/finn/Smash repair Engine/stage-3/deliverables/test-report.txt

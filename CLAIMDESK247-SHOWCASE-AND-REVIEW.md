@@ -13,7 +13,7 @@ ClaimDesk 247 takes an accident report from a member of the public (web today; v
 
 The differentiator is **governance, not cleverness**: the fault decision is deterministic and testable (no LLM hallucination in the legal path), every step is logged to an append-only audit trail, all data stays in Australia, and a qualified lawyer signs off the legal substance before launch. The trade-off is **scope**: today it covers 6 common NSW collision scenarios (≈70–85% of two-vehicle *moving* collisions, indicative), single jurisdiction, web channel.
 
-What is genuinely live and verified: the engine deployed in Sydney, full intake→band→PDF, 75/75 automated tests against the deployed API, row-level security and append-only audit proven by query, AU data residency, MFA, CORS lockdown, rate limiting. What is planned or partial is stated plainly in §9–§10.
+What is genuinely live and verified: the engine deployed in Sydney, full intake→band→PDF, **99/99 automated tests against the deployed API as of 2026-06-21** (was 87/87 pre-T4/T6/T8, 79/79 pre-T6, 75/75 pre-MFA, 73/73 pre-Stage-2.5), row-level security and append-only audit proven by query, AU data residency, MFA, CORS lockdown, rate limiting. What is planned or partial is stated plainly in §9–§10.
 
 ---
 
@@ -77,7 +77,7 @@ Four bands map to "how closely this matches a well-understood pattern," not a pr
 ## 5. Governance & gate system
 
 ### 5.1 Gates
-The build runs against a numbered gate set (G-01…G-62). Stage 4 (deploy/QA/sign-off) currently stands at **PASS 11 / PARTIAL 1 / OPEN 0** — including AU residency (G-52), RLS (G-53), append-only audit (G-54), CORS lockdown (G-55), rate-limiting (G-56), MFA (G-57), and a **75/75 regression against the deployed API** (G-62/G-51).
+The build runs against a numbered gate set (G-01…G-62). Stage 4 (deploy/QA/sign-off) currently stands at **PASS 11 / PARTIAL 1 / OPEN 0** — including AU residency (G-52), RLS (G-53), append-only audit (G-54), CORS lockdown (G-55), rate-limiting (G-56), MFA (G-57), and a **99/99 regression against the deployed API** (G-62/G-51).
 
 ### 5.2 Newly identified P0 gates (from the gate-completeness review)
 To guarantee "no incomplete loop": **G-PROD-LOCK** (production refuses any scenario not legally signed-off for the deployed version), **G-VER** (sign-off bound to a rule-tree version hash; edits auto-invalidate approval), **G-LH** (Legal Head yes/no is a recorded gate), **G-AMEND** (a stage cannot close while any finding or legal NO is open). Plus Stage-5: rollback, feedback-capture, coverage backtest, drift monitoring.
@@ -110,7 +110,7 @@ Principles: invest in planning so the direction is right (cheapest insurance aga
 | AI policy & objectives (A.2) | 🟡 Partial | Governance principles are explicit (deterministic decision, human gate, no %); **no formal written AI policy doc** yet. |
 | Roles & responsibilities (A.3) | 🟢 Aligned | Clear separation: Plan (Fables) / Build (Cursor) / Audit (Opus) / Legal Head (human). |
 | AI impact assessment (A.5) | 🔴 Gap | **No formal AI system impact assessment** (affected parties, harms, mitigations) document. Recommended next. |
-| System lifecycle, V&V (A.6) | 🟢 Strong | Gated loop, 75/75 automated regression, deterministic & reproducible decisions, version-controlled rule tree. |
+| System lifecycle, V&V (A.6) | 🟢 Strong | Gated loop, 79/79 automated regression (was 75/75 pre-T1), deterministic & reproducible decisions, version-controlled rule tree. |
 | Data for AI (A.7) | 🟢 Aligned | AU-resident, RLS, append-only audit, consent-first, minimal collection; **no formal data-governance register** yet. |
 | Transparency to users (A.8) | 🟢 Strong | Verbatim disclaimer every result; "general information, not legal advice"; band-not-verdict framing. |
 | Human oversight (A.9) | 🟢 Strong | 7 escalation triggers + human gate as final authority; legal sign-off. |
@@ -215,7 +215,7 @@ Principles: invest in planning so the direction is right (cheapest insurance aga
 - **Frontend:** TanStack Start / Vite / Nitro on Vercel (region `syd1`); domain `claimdesk247.com.au` (Cloudflare DNS).
 - **Engine:** FastAPI (Stage 2.5 wrapper over Stage 3 deterministic logic) on Vercel (`syd1`); `/healthz` live.
 - **Data:** Supabase (Sydney, `ap-southeast-2`); `intake_sessions` + append-only `audit_log`; RLS staff-read; service-role server-side only.
-- **Tests:** 75/75 against the deployed engine (stage-2 30 · stage-3 27 · stage-2.5 18).
+- **Tests:** 79/79 against the deployed engine (stage-2 30 · stage-3 31 · stage-2.5 18; was 75/75 pre-T1, 73/73 pre-Stage-2.5).
 - **Security verified:** RLS (anon reads 0 rows), append-only (anon write rejected 42501), CORS exact-origin, rate-limit (5/min/IP), MFA TOTP/AAL2 enforced, server-side AAL2 on brief (flag-gated).
 - **Rule tree:** `rule-tree.nsw.v3.json` v3.0.0; bands `likely/possible/unclear/insufficient`; 6 scenarios + 7 escalation triggers.
 

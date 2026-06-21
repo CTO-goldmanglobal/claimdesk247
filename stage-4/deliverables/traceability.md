@@ -13,7 +13,7 @@ This is the single source of truth for what was built, where, and what proves it
 | Gate | Code | Test | Artefact |
 |------|------|------|----------|
 | **G-50** Staging URL live; full web intake E2E | `stage-2.5/app/wrap.py` (FastAPI app); deployed via Vercel | T-25-001..T-25-018 (full weblink runner) | `preflight.py:g50_staging_url_live` output |
-| **G-51** Supabase adapter passes the full 73-test suite | `stage-4/app/supabase_store.py:SupabaseStore` | T-25-016 (regression runner) | `stage-2.5/deliverables/test-report.txt` (75/75 green) |
+| **G-51** Supabase adapter passes the full 99-test suite (Stage 2 30 + Stage 3 50 + Stage 2.5 19; pre-T4/T6/T8 was 87, pre-T6 was 79, pre-MFA was 75, pre-Stage-2.5 was 73) | `stage-4/app/supabase_store.py:SupabaseStore` | T-25-016 (regression runner) | `stage-2.5/deliverables/test-report.txt` (99/99 green) |
 | **G-52** Data residency: Supabase=Sydney; Vercel PII=`syd1` | `architecture/INFRA-PROVISIONING-CHECKLIST.md` | (deployer-evidence — screenshot) | `sign-off-package/item-7-retention-storage.md` |
 | **G-53** RLS enforced in DB: customer/anon cannot read intake or audit | `stage-4/app/supabase_store.py` (RLS-aware; uses supabase-py subject to RLS) | T-25-009 (customer → 403 server-side); `preflight.py:g53_rls_enforced` | `sign-off-package/item-8-audit-log.md` (SQL evidence) |
 | **G-54** `audit_log` append-only at DB level | `stage-4/app/supabase_store.py` (SQL for `audit_log_no_update` / `audit_log_no_delete`) + `stage-3/app/audit.py:AuditLog` (language-level) | `preflight.py:g54_audit_append_only` | `sign-off-package/item-8-audit-log.md` |
@@ -22,14 +22,14 @@ This is the single source of truth for what was built, where, and what proves it
 | **G-57** MFA enforced on all dashboard roles | `stage-2.5/app/wrap.py:_mfa_satisfied` + check in `get_brief` | T-25-017 (no MFA → 403), T-25-018 (MFA → 200); `preflight.py:g57_mfa_enforced` | `preflight.py` output |
 | **G-58** E2E QA on live staging (Part A, 13 journeys) | `stage-4/QA-PLAN-AND-GOLIVE-CHECKLIST.md:Part A` | (deployer-runs manually; tick boxes) | `sign-off-package/qa-evidence/*.png` + session refs |
 | **G-61** Sign-off package complete: 8 items | `stage-4/sign-off-package/00-INDEX.md` (all 8 items mapped) + 8 item files | (firm reviews) | `sign-off-package/` |
-| **G-62** Regression: 73/73 still green (weblink) | (covered by G-51 runner) | T-25-016 (regression marker) | `stage-2.5/deliverables/test-report.txt` |
+| **G-62** Regression: 99/99 still green (weblink; pre-T4/T6/T8 was 87, pre-T6 was 79, pre-MFA was 75, pre-Stage-2.5 was 73) | (covered by G-51 runner) | T-25-016 (regression marker) | `stage-2.5/deliverables/test-report.txt` |
 
 ## P1 gates
 
 | Gate | Code | Test | Artefact |
 |------|------|------|----------|
 | **G-59** x-test-mode confirmed inert in production | `stage-2.5/app/wrap.py:_is_test_mode_active` (env-gated) | T-25-012 (preview enabled, production gated) | `preflight.py:g59_test_mode_inert` |
-| **G-60** All carry-in CRs (5-01, 5-04, 4-01, 4-02) landed | `preflight.py:g60_carry_in_crs` (source-grep audit) | (covered by 75/75 green) | `preflight.py` output |
+| **G-60** All carry-in CRs (5-01, 5-04, 4-01, 4-02) landed | `preflight.py:g60_carry_in_crs` (source-grep audit) | (covered by 99/99 green as of 2026-06-21; was 79/79 pre-T4/T6/T8, 75/75 pre-MFA, 73/73 pre-Stage-2.5) | `preflight.py` output |
 
 ## Carry-in CRs (G-60 detail)
 

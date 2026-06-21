@@ -5,6 +5,8 @@
 **Status:** 🔄 **Loop OPEN** — partial pass. AU infra + DB + UI deploy done; the engine-endpoint dependency blocks the test/QA/security gates.
 **Governed by:** `LOOP-OPERATING-RULES.md` §7 (loop-closed definition)
 
+> **Note (2026-06-20):** This is a historical INTERIM audit. The 75/75 figures below were accurate on 2026-06-13 (pre-T1 closure). The current test count is **79/79** (Stage 2 30 + Stage 3 31 + Stage 2.5 18; T-1-01..04 added by G-PROD-LOCK/G-VER 2026-06-15). For the current state, see `stage-4/deliverables/combined-test-report.txt`. The historical numbers in this file are preserved for audit-trail integrity.
+
 ---
 
 ## 1. The one blocker that gated everything → CLEARED (2026-06-14)
@@ -72,3 +74,19 @@ Stage 4 budget is 1 audit + 1 revision (config-fix stage). This interim audit co
 
 ---
 *Interim audit by Fables · finn@goldmanglobal.com.au · 2026-06-13. Loop reopens for formal audit on engine-deploy delivery.*
+
+---
+
+## Appendix — Update log (count evolution)
+
+| Date | Total | Stage 2 / 3 / 2.5 | Source | Note |
+|------|-------|-------------------|--------|------|
+| 2026-06-11 | 73/73 | 30 / 25 / 18 | pre-Stage-2.5 | baseline |
+| 2026-06-13 | 75/75 | 30 / 27 / 18 | pre-T1 | +T-1-01..02 |
+| 2026-06-14 | 75/75 | 30 / 27 / 18 | pre-MFA | +T-1-01..04 + Supabase adapter fix (this audit) |
+| 2026-06-14 | 79/79 | 30 / 31 / 18 | post-MFA | +T-25-017/018 MFA tests |
+| 2026-06-19 | 87/87 | 30 / 38 / 19 | post-T7 | +T-7-09/10 parked-likely/possible |
+| 2026-06-20 | 90/90 | 30 / 41 / 19 | post-T6 | +T-6-* question injection |
+| **2026-06-21** | **99/99** | **30 / 50 / 19** | **post-T4/T6/T8/T25-019** | **+T-4-01..11 (G-VER Tier-1 closure), T-6-25, T-8-01/02 (outside_nsw/not_listed→callback), T-25-019 (scenario-question endpoint). Verified locally 2026-06-21 03:10 UTC+10 post-fast-forward of `lovable-ui` to `origin/main` (commit `144516e`).** |
+
+*Per PROJECT_GUARDRAIL.md §6, test counts in historical audits are preserved with explicit update notes rather than retroactively rewritten.*

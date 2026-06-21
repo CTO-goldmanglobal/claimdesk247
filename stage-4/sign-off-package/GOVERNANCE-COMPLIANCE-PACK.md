@@ -1,5 +1,7 @@
 # ClaimDesk 247 — Governance & Compliance Pack
-**Operator:** Goldman Forge Legal · **System:** ClaimDesk 247 (NSW accident intake + fault-guidance engine)
+**Operator:** `{{OPERATOR_NAME}}` [Legal Head / firm decision] · **System:** ClaimDesk 247 (NSW accident intake + fault-guidance engine)
+**Technical supplier:** Goldman Forge · **Underlying platform:** ForgeWright (Goldman Forge's product)
+**Brand framing (Jun 20, 2026):** claimdesk247.com.au is an independent product site; goldmanglobal.com.au is the Goldman Forge showcase site that displays ClaimDesk 247 as one of its products (one-directional, no parent/child link). The operator of claimdesk247.com.au is the firm/ClaimDesk entity — not Goldman Forge Legal, not Goldman Global Financial Pty Ltd.
 **Status:** ⚠️ **DRAFT for firm + Privacy Officer ratification.** These documents close the "no document exists" gap identified in the review. They are working drafts to be reviewed, completed where marked `[FIRM]`, dated, owned, and adopted — they are not yet ratified policy. · **Prepared by:** Fables (Cowork) · 2026-06-14
 
 Contents: 1) AI Management Policy · 2) AI System Impact Assessment + Risk Register · 3) Privacy Impact Assessment (APP mapping) · 4) Data Breach Response Plan · 5) Data Handling Procedures (access/correction, retention/destruction) · 6) Supplier Register. Mapped to **ISO/IEC 42001:2023** and the **Privacy Act 1988 (Cth) / Australian Privacy Principles**.
@@ -30,7 +32,7 @@ Contents: 1) AI Management Policy · 2) AI System Impact Assessment + Risk Regis
 | # | Risk | Likelihood | Impact | Controls in place | Residual / action |
 |---|------|-----------|--------|-------------------|-------------------|
 | R1 | User mistakes guidance for legal advice | Med | High | Verbatim disclaimer every output; band-not-verdict; no % | Legal Head confirms wording; monitor complaints |
-| R2 | Wrong fault band given | Low | High | Deterministic tree; lawyer-approved; damage-consistency check; escalation; 75/75 tests | Backtest vs historical claims `[action]` |
+| R2 | Wrong fault band given | Low | High | Deterministic tree; lawyer-approved; damage-consistency check; escalation; 99/99 tests (Stage 2 30 + Stage 3 50 + Stage 2.5 19; was 87/87 pre-T4/T6/T8, 79/79 pre-T6) | Backtest vs historical claims `[action]` |
 | R3 | Distressed/injured user not escalated | Low | High | `esc-injury` + 6 other triggers stop the machine | Periodic transcript review `[action]` |
 | R4 | Generative component influences fault | Low | High | Architecture forbids it; tree is sole authority; disagreement → escalate | G-PROD-LOCK enforces (below) |
 | R5 | PII exposure / breach | Low | High | RLS, MFA/AAL2, append-only audit, AU-only, no PII in URLs | Pen-test `[action]`; breach plan §4 |

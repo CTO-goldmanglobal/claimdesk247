@@ -5,6 +5,8 @@
 
 73/73 reproduced independently. Parity (the reason this stage exists) holds. One CORS finding I'm elevating above the builder's own framing — read CR-5-02 below.
 
+> **Note (2026-06-20):** Historical audit. The 73/73 figure was accurate at audit time. Current test count is **79/79** (Stage 2 30 + Stage 3 31 + Stage 2.5 18; Stage 3 gained T-1-01..04 via G-PROD-LOCK/G-VER 2026-06-15, and Stage 2.5 gained T-25-017/T-25-018 MFA tests during Stage 4 hardening). Historical numbers preserved for audit-trail integrity.
+
 ## Independent verification (Fables re-ran)
 
 | Check | Result | Evidence |

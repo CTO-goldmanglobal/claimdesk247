@@ -127,7 +127,7 @@ Loop-integrity gates apply to every stage: **G-PROD-LOCK** (prod refuses unsigne
 ---
 
 ## Current status feeding into L0
-Engine live (Sydney) · 75/75 regression · RLS/append-only/CORS/rate-limit/MFA verified · server-side AAL2 built (flag-gated) · compliance pack + gate register **drafted** · Legal-Head packet ready.
+Engine live (Sydney) · **99/99 regression** as of 2026-06-21 (was 87/87 pre-T4/T6/T8, 79/79 pre-T6, 75/75 pre-MFA, 73/73 pre-Stage-2.5) · RLS/append-only/CORS/rate-limit/MFA verified · server-side AAL2 built (flag-gated) · compliance pack + gate register **drafted** · Legal-Head packet ready.
 
 **L0 progress (2026-06-14):**
 - ✅ **Live-site P0 fixes shipped & verified** (commit `144516e`): `tel:000` removed from bundle + DOM (CTAs now route to `/intake`); fabricated "4.9★ / 1,200+ drivers" rating + "Jess M." testimonial removed (Australian Consumer Law); "Supabase & Vercel Hub" meta removed; `author` → Goldman Forge Legal; titles → ClaimDesk 247; OG/Twitter image → real logo.

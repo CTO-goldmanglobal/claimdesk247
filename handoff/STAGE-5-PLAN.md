@@ -26,7 +26,7 @@
 | stage-2 | 30/30 | not in repo (intentional — predecessor state) |
 | stage-2.5 | 18/18 (incl. 1 stage-2 regression marker, marked PASS as cross-suite) | 17/18 — the 1 fail (T-25-016) is the cross-stage regression whose target `stage-2/` is intentionally absent from the engine repo |
 | stage-3 | 31/31 (27 baseline + 4 new T-1-01..T-1-04) | 30/31 — the 1 fail (T-3-027) is the same cross-stage regression |
-| **Total** | **79/79** | **47/48** |
+| **Total** | **99/99** | **78/80** (1 SKIP, 1 FAIL by-design) |
 
 The clone's 1 fail is **pre-existing and by design** — the engine repo doesn't carry `stage-2/`, which is the predecessor stage. Verified separately in the working folder. **No regression introduced by T1.**
 
@@ -101,7 +101,7 @@ This is what B1–B6 (and later B7–B15) must be signed against. Per scenario i
 | Gate | Status | Notes |
 |---|---|---|
 | G-50 staging live; web e2e | 🟢 PASS (per audit 2026-06-14) | `claimdesk247.com.au` live against real engine |
-| G-51 / G-62 scored regression | 🟢 PASS (per audit 2026-06-14) | 75/75 vs deployed preview; bypass secret deleted (so any future remote run needs a fresh secret) |
+| G-51 / G-62 scored regression | 🟢 PASS (per audit 2026-06-14) | 99/99 vs deployed preview as of 2026-06-21 (was 75/75 at audit time; gained T-1-01..04 from G-PROD-LOCK/G-VER, T-25-017/T-25-018 MFA tests, T-4-01..11 G-VER closure Tier-1, T-6-* question injection, T-8-01/02 parked/not_listed, T-25-019 scenario-question); bypass secret deleted (so any future remote run needs a fresh secret) |
 | G-52 AU residency | 🟢 PASS | Supabase `ap-southeast-2`; Vercel `syd1` only |
 | G-53 RLS enforced | 🟢 PASS | Anon reads 0 rows; staff-read RLS policies |
 | G-54 audit_log append-only | 🟡 **CLIENT-ENFORCED** (per audit) | Append-only trigger `0003` written; needs CTO to apply to Supabase (D-7) |

@@ -22,6 +22,7 @@ Key constraints:
 """
 from __future__ import annotations
 
+import base64
 import importlib
 import importlib.util
 import json
@@ -250,8 +251,33 @@ ESCALATION_MESSAGE = (
 )
 
 
+# Plain-English labels for option values the auto-humaniser can't make clear.
+# Drives the dropdowns the customer actually sees (clarity fixes for state +
+# the confusing parking/other choices).
+_OPTION_LABELS: dict[str, str] = {
+    # state_of_accident
+    "NSW": "New South Wales",
+    "outside_nsw": "Somewhere else in Australia",
+    # accident_type
+    "rear-end": "Rear-end (hit from behind, or I hit the car in front)",
+    "T-intersection": "Give-way or T-intersection",
+    "roundabout": "Roundabout",
+    "merge": "Merging or changing lanes",
+    "reversing": "I was reversing",
+    "car_park": "Car park — I was driving or reversing in a car park",
+    "parked_hit": "My parked car was hit (whether or not I was in it)",
+    "intersection_signalised": "Traffic-light intersection",
+    "turning_right": "Turning right across oncoming traffic",
+    "sideswipe_same_direction": "Sideswipe — both going the same way",
+    "multi_vehicle": "Multiple vehicles (3 or more)",
+    "not_listed": "Something else / I'm not sure",
+}
+
+
 def _opt_label(value: str) -> str:
-    """Humanise an enum value for display. State codes stay upper-case."""
+    """Humanise an enum value for display. Explicit labels win; state codes stay upper-case."""
+    if value in _OPTION_LABELS:
+        return _OPTION_LABELS[value]
     if value.isupper():
         return value
     return value.replace("-", " ").replace("_", " ").capitalize()
@@ -293,6 +319,30 @@ def _next_question(intake: dict[str, Any]) -> dict[str, Any]:
     return _slot_question(idx)
 
 
+_SCENARIO_INPUT_TYPE = {
+    "enum": "single_choice",
+    "multienum": "multi_choice",
+    "integer": "text",
+    "text": "text",
+}
+
+
+def _scenario_slot_question(q: dict[str, Any]) -> dict[str, Any]:
+    """Render a scenario classification_question as a SlotQuestion (T6).
+    Uses the question's `question_web` as the prompt and `options` as buttons,
+    so the frontend renders it through the existing SlotQuestion path."""
+    options = None
+    if q.get("options"):
+        options = [{"value": v, "label": _opt_label(v)} for v in q["options"]]
+    return {
+        "slot": q["slot"],
+        "prompt": q.get("question_web") or q.get("slot"),
+        "inputType": _SCENARIO_INPUT_TYPE.get(q.get("answer_type", "text"), "text"),
+        "options": options,
+        "done": False,
+    }
+
+
 # ----- Request / response models -----
 # Models accept BOTH dialects so the same endpoints serve the Lovable
 # frontend (camelCase `ref`) and the engine-contract acceptance tests
@@ -325,6 +375,15 @@ class ClassifyRequest(BaseModel):
 class ExtrasRequest(BaseModel):
     """Stage 4 (CR-5-01): engine-only intake fields, set via /api/intake/:ref/extras."""
     fields: dict[str, Any]
+
+
+class ScenarioQuestionRequest(BaseModel):
+    """T6: scenario-question injection. No question_id => start (returns the
+    first scenario question). With question_id+value => submit an answer."""
+    reference: Optional[str] = None
+    ref: Optional[str] = None
+    question_id: Optional[str] = None
+    value: Any = None
 
 
 # ----- App factory -----
@@ -477,7 +536,7 @@ def create_app() -> FastAPI:
             # UI calls classify, which returns the calm handoff message.
             if s.escalation:
                 return {"ref": s.reference, "next": dict(_DONE_QUESTION),
-                        "progress": _progress(s.intake)}
+                        "progress": _progress(s.intake), "escalated": True}
             # Valid -> advance; invalid -> _next_question returns the SAME slot
             # (not yet stored), so the UI simply re-asks it.
             return {"ref": s.reference, "next": _next_question(s.intake),
@@ -556,6 +615,29 @@ def create_app() -> FastAPI:
         return {"stored": list(payload.fields.keys())}
 
     # ---- /api/classify (G-41, G-42, G-43) ----
+    def _render_pdf_for_session(s: Any) -> bytes:
+        """Render the customer-facing summary PDF for a session.
+
+        Extracted from /api/pdf/:ref so the classify response can include
+        the same bytes inline (base64-encoded) and bypass the Vercel
+        serverless session-persistence problem. See the note on get_pdf
+        below for the full history.
+        """
+        intake_record = {
+            "session_id": s.session_id,
+            "reference": s.reference,
+            **s.intake,
+        }
+        if s.engine_result:
+            intake_record["band"] = s.engine_result.band
+            intake_record["scenario_id"] = s.engine_result.scenario_id
+            intake_record["output_text"] = s.engine_result.text_web
+        return stage3_pdf_gen.render_summary_pdf(
+            reference=s.reference,
+            intake=intake_record,
+            engine_result=s.engine_result,
+        )
+
     @app.post("/api/classify")
     def post_classify(req: ClassifyRequest) -> Any:
         frontend_mode = req.ref is not None
@@ -574,6 +656,7 @@ def create_app() -> FastAPI:
                 "outputText": ESCALATION_MESSAGE.format(ref=s.reference),
                 "disclaimerText": stage3_config.get_disclaimer("master"),
                 "escalated": True,
+                "pdf_base64": base64.b64encode(_render_pdf_for_session(s)).decode("ascii"),
             }
 
         # CR-5-04: out-of-enum band is fail-closed via the engine's
@@ -591,6 +674,7 @@ def create_app() -> FastAPI:
                     "outputText": ESCALATION_MESSAGE.format(ref=s.reference),
                     "disclaimerText": stage3_config.get_disclaimer("master"),
                     "escalated": True,
+                    "pdf_base64": base64.b64encode(_render_pdf_for_session(s)).decode("ascii"),
                 }
             return {
                 "escalation": er.escalation,
@@ -619,28 +703,79 @@ def create_app() -> FastAPI:
             "scenario_id": er.scenario_id,
             "outputText": resolved_output,
             "disclaimerText": disclaimer,
+            "pdf_base64": base64.b64encode(_render_pdf_for_session(s)).decode("ascii"),
+        }
+
+    # ---- /api/scenario-question (T6: scenario-question injection) ----
+    @app.post("/api/scenario-question")
+    def post_scenario_question(req: ScenarioQuestionRequest) -> Any:
+        ref = req.ref or req.reference
+        s = SESSIONS.by_reference(ref) if ref else None
+        if s is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        if not s.consent:
+            raise HTTPException(status_code=400, detail="consent required")
+
+        # Branch on session state: at S4-CLASSIFY this call STARTS the phase; at
+        # S3.5 it SUBMITS the current answer. (The frontend doesn't track ids.)
+        if s.state == "S4-CLASSIFY":
+            result = stage3_state_machine.start_scenario_questions(s)
+            SESSIONS.put(s)
+            q = result.get("question")
+            return {
+                "ref": s.reference,
+                "next": _scenario_slot_question(q) if q else dict(_DONE_QUESTION),
+                "answered": result.get("answered", 0),
+                "total_questions": result.get("total_questions", 0),
+                "ready_to_classify": result.get("ready_to_classify", q is None),
+            }
+
+        if s.state != "S3.5-INJECT-QUESTIONS":
+            raise HTTPException(status_code=409,
+                                detail=f"no scenario question pending (state {s.state})")
+        # question_id is optional — when omitted the answer applies to the current question.
+        result = stage3_state_machine.submit_scenario_question(s, req.question_id, req.value)
+        SESSIONS.put(s)
+
+        if result.get("end_state") == "SX-ESCALATE" or s.escalation:
+            return {"ref": s.reference, "next": dict(_DONE_QUESTION),
+                    "escalation": s.escalation, "escalated": True, "ready_to_classify": False}
+        if result.get("reprompt"):
+            return {"ref": s.reference, "reprompt": True, "error": result.get("error"),
+                    "reprompt_count": result.get("reprompt_count"), "ready_to_classify": False}
+
+        nxt = result.get("next_question")
+        return {
+            "ref": s.reference,
+            "next": _scenario_slot_question(nxt) if nxt else dict(_DONE_QUESTION),
+            "answered": result.get("answered", 0),
+            "total_questions": result.get("total_questions", 0),
+            "ready_to_classify": result.get("ready_to_classify", nxt is None),
         }
 
     # ---- /api/pdf/:ref (G-44) ----
+    # NOTE 2026-06-19: this endpoint was the only P0 in the customer-flow UX
+    # audit. On Vercel's serverless runtime, the in-memory SESSIONS dict is
+    # not shared across lambda invocations, so the GET that downloads the
+    # PDF almost always lands in a different instance from the one that
+    # created the session. The endpoint therefore returns 404 'session not
+    # found' for every real browser customer, even though server-to-server
+    # curl tests pass.
+    #
+    # Two changes fix this without touching the session store:
+    #   1. /api/classify now also returns the rendered PDF as `pdf_base64`,
+    #      so the customer's browser already has the bytes and never needs
+    #      to call this endpoint.
+    #   2. /api/pdf/:ref is kept for back-compat (e.g. server-side tooling)
+    #      but is no longer the customer-facing download path.
+    # See handoff/UX-AUDIT-CUSTOMER-FLOW-2026-06-19-v2.md for the audit
+    # trail and handoff/CTO-ACTION-CORS-FIX.md for the related CORS work.
     @app.get("/api/pdf/{ref}")
     def get_pdf(ref: str) -> Response:
         s = SESSIONS.by_reference(ref)
         if s is None:
             raise HTTPException(status_code=404, detail="session not found")
-        intake_record = {
-            "session_id": s.session_id,
-            "reference": s.reference,
-            **s.intake,
-        }
-        if s.engine_result:
-            intake_record["band"] = s.engine_result.band
-            intake_record["scenario_id"] = s.engine_result.scenario_id
-            intake_record["output_text"] = s.engine_result.text_web
-        pdf_bytes = stage3_pdf_gen.render_summary_pdf(
-            reference=s.reference,
-            intake=intake_record,
-            engine_result=s.engine_result,
-        )
+        pdf_bytes = _render_pdf_for_session(s)
         return Response(
             content=pdf_bytes,
             media_type="application/pdf",

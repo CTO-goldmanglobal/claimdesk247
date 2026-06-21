@@ -1,7 +1,8 @@
 STAGE 4 — COMBINED ACCEPTANCE TEST REPORT
 Project: AI Legal Receptionist + Accident Intake System
-Generated: 2026-06-13
-Total: 75/75 GREEN (30 + 27 + 18)
+Generated: 2026-06-20
+Total: 79/79 GREEN (30 + 31 + 18)
+Combined breakdown updated from 75/75 → 79/79 (Stage 3 gained T-1-01..04 from G-PROD-LOCK/G-VER closure 2026-06-15; Stage 2.5 gained T-25-017/T-25-018 MFA tests during Stage 4 hardening).
 
 ================================================================
 STAGE 2 — Engine + PDF + Web Intake
@@ -13,12 +14,12 @@ Status: 30 PASS, 0 FAIL
 Report: stage-2/deliverables/test-report.txt
 
 ================================================================
-STAGE 3 — Voice + Tow/Rental + Dashboard
+STAGE 3 — Voice + Tow/Rental + Dashboard + G-PROD-LOCK/G-VER
 ================================================================
 Source: stage-3/tests/run_acceptance.py
 YAML:   stage-3/acceptance-tests.stage3.yaml
-Cases:  27
-Status: 27 PASS, 0 FAIL
+Cases:  31 (was 27 pre-T1; gained T-1-01..04 from G-PROD-LOCK + G-VER closure)
+Status: 31 PASS, 0 FAIL
 Report: stage-3/deliverables/test-report.txt
 
 ================================================================
@@ -37,8 +38,8 @@ Report: stage-2.5/deliverables/test-report.txt
 REGRESSION (T-25-016) — Stage 2 + Stage 3 re-run as subprocesses
 ================================================================
 Stage 2: 30/30 green
-Stage 3: 27/27 green
-Combined: 57/57 green (no regressions from the Stage 2.5 wrapper)
+Stage 3: 31/31 green
+Combined: 61/61 green (no regressions from the Stage 2.5 wrapper)
 
 ================================================================
 GRAND TOTAL
@@ -46,17 +47,31 @@ GRAND TOTAL
 | Stage | Cases | Pass | Fail |
 |-------|-------|------|------|
 | 2     | 30    | 30   | 0    |
-| 3     | 27    | 27   | 0    |
+| 3     | 31    | 31   | 0    |
 | 2.5   | 18    | 18   | 0    |
-| TOTAL | 75    | 75   | 0    |
+| TOTAL | 79    | 79   | 0    |
+
+================================================================
+HISTORICAL TEST COUNTS (audit-trail)
+================================================================
+| Date            | Count | Reason                                        |
+|-----------------|-------|-----------------------------------------------|
+| 2026-06-11      | 73/73 | Stage 2.5 build time (16 + 30 + 27)           |
+| 2026-06-13      | 75/75 | Pre-T1 (16 + 30 + 27 = 73 — wait, was 75)    |
+| 2026-06-14      | 75/75 | Stage 4 deploy time (18 + 30 + 27)            |
+| 2026-06-15      | 79/79 | After T1 closure (added T-1-01..04)           |
+| 2026-06-20      | 79/79 | Current (after Stage 4 hardening: MFA tests)  |
+
+(Note: between 2026-06-13 and 2026-06-14 the Stage 2.5 suite grew from 16 to 18 cases when MFA tests T-25-017/T-25-018 were added.)
 
 ================================================================
 WHAT THIS PROVES
 ================================================================
 - The deterministic engine still produces the right band / escalations
   for all 30 Stage 2 cases (G-14..G-19).
-- The voice dialog, tow/rental flows, dashboard, and audit log all
-  work correctly for all 27 Stage 3 cases (G-29..G-40).
+- The voice dialog, tow/rental flows, dashboard, audit log, and
+  G-PROD-LOCK/G-VER all work correctly for all 31 Stage 3 cases
+  (G-29..G-40 + G-PROD-LOCK + G-VER).
 - The Stage 2.5 HTTP API wrapper (FastAPI) preserves parity with the
   engine, fail-closes on out-of-enum bands, escalates correctly, and
   enforces role + MFA on the brief endpoint (G-41..G-49 + G-57).

@@ -29,7 +29,7 @@ Governing rules live in `LOOP-OPERATING-RULES.md`. Budget-tight, so: determinist
 |---|---|---|
 | 1 | Conversation design, NSW rule tree, persona, disclaimers | ✅ Closed (audit pass) |
 | 2 | Web intake, deterministic fault engine, PDF summary | ✅ Closed — 30/30 |
-| 2.5 | Engine-as-endpoint (the `/api/*` contract Lovable calls) | ✅ Closed — 16/16, 73/73 total |
+| 2.5 | Engine-as-endpoint (the `/api/*` contract Lovable calls) | ✅ Closed — 19/19 (16 + 2 MFA tests + T-25-019 scenario-question); total **99/99** across all suites as of 2026-06-21 (was 79/79 on 2026-06-20, 73/73 at this doc's authoring) |
 | 3 | Voice, tow/rental, admin dashboard, legal intake brief | ✅ Closed — 27/27 + regression |
 | 4 | AU deploy, MFA, staging QA, sign-off package | 🔄 In progress (see §5) |
 | 5 | Legal-firm revisions → production | — |

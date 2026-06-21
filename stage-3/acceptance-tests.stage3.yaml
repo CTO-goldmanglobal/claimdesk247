@@ -229,8 +229,134 @@ cases:
   inputs: { run: hash_determinism }
   expect: { length: 64, legal_signoff_stripped: true }
 
+# ---- T6: scenario-question injection (L1 dependency) ----
+- id: T-6-01
+  gate: G-T6
+  channel: engine
+  desc: start_scenario_questions returns the first scenario question and enters S3.5
+  inputs: { run: t6_start }
+  expect: { state: "S3.5-INJECT-QUESTIONS", first_question: s1-q1 }
+
+- id: T-6-02
+  gate: G-T6
+  channel: engine
+  desc: submit a valid scenario answer; advances to the next question and persists to intake
+  inputs: { run: t6_advance }
+  expect: { next: s1-q2, persisted: user_position }
+
+- id: T-6-03
+  gate: G-T6
+  channel: engine
+  desc: answering all scenario questions sets ready_to_classify and returns to S4-CLASSIFY
+  inputs: { run: t6_complete }
+  expect: { ready_to_classify: true, state: "S4-CLASSIFY" }
+
+- id: T-6-04
+  gate: G-T6
+  channel: engine
+  desc: invalid scenario answer re-prompts without leaving S3.5
+  inputs: { run: t6_reprompt }
+  expect: { reprompt: true }
+
+- id: T-6-05
+  gate: G-T6
+  channel: engine
+  desc: scenario-question re-prompt cap escalates to SX-ESCALATE with a reference
+  inputs: { run: t6_reprompt_cap }
+  expect: { escalation: "reprompt-cap", end_state: "SX-ESCALATE" }
+
+- id: T-6-06
+  gate: G-T6
+  channel: engine
+  desc: integer scenario-question type rejects non-integers and accepts integers
+  inputs: { run: t6_integer }
+  expect: { rejects_non_int: true, accepts_int: true }
+
+- id: T-6-07
+  gate: G-T6
+  channel: engine
+  desc: no resolvable scenario passes straight through to classify (no questions)
+  inputs: { run: t6_no_scenario }
+  expect: { ready_to_classify: true, state: "S4-CLASSIFY" }
+
+# ---- T4/T5: Phase-2 Tier-1 scenarios (s7–s10, rule tree v3.1.0) ----
+- id: T-7-01
+  gate: G-T4
+  channel: engine
+  desc: car-park — aisle vehicle vs reversing-from-bay -> likely
+  inputs: { run: t7_carpark_likely }
+  expect: { band: likely, scenario: s7-car-park }
+- id: T-7-02
+  gate: G-T4
+  channel: engine
+  desc: car-park — both reversing -> unclear
+  inputs: { run: t7_carpark_unclear }
+  expect: { band: unclear, scenario: s7-car-park }
+- id: T-7-03
+  gate: G-T4
+  channel: engine
+  desc: signalised — user on green going straight -> likely
+  inputs: { run: t7_signal_likely }
+  expect: { band: likely, scenario: s8-signalised-intersection }
+- id: T-7-04
+  gate: G-T4
+  channel: engine
+  desc: signalised — light unsure -> unclear
+  inputs: { run: t7_signal_unclear }
+  expect: { band: unclear, scenario: s8-signalised-intersection }
+- id: T-7-05
+  gate: G-T4
+  channel: engine
+  desc: right-turn — user straight, other turning, no arrow -> likely
+  inputs: { run: t7_rightturn_likely }
+  expect: { band: likely, scenario: s9-right-turn-oncoming }
+- id: T-7-06
+  gate: G-T4
+  channel: engine
+  desc: right-turn — turning driver had green arrow -> unclear
+  inputs: { run: t7_rightturn_unclear }
+  expect: { band: unclear, scenario: s9-right-turn-oncoming }
+- id: T-7-07
+  gate: G-T4
+  channel: engine
+  desc: sideswipe — user holding lane, other changing -> likely
+  inputs: { run: t7_sideswipe_likely }
+  expect: { band: likely, scenario: s10-sideswipe-same-direction }
+- id: T-7-08
+  gate: G-T4
+  channel: engine
+  desc: sideswipe — both changing lanes -> unclear
+  inputs: { run: t7_sideswipe_unclear }
+  expect: { band: unclear, scenario: s10-sideswipe-same-direction }
+- id: T-7-09
+  gate: G-T4
+  channel: engine
+  desc: parked car hit — lawfully parked & stationary -> likely
+  inputs: { run: t7_parked_likely }
+  expect: { band: likely, scenario: s11-parked-vehicle }
+- id: T-7-10
+  gate: G-T4
+  channel: engine
+  desc: parked car hit — parked illegally -> possible
+  inputs: { run: t7_parked_possible }
+  expect: { band: possible, scenario: s11-parked-vehicle }
+
+# ---- Intake-clarity: NSW-only callback + unmapped-type callback (no dead ends) ----
+- id: T-8-01
+  gate: G-21
+  channel: web
+  desc: NSW-only — choosing 'outside_nsw' routes to a human callback with a reference
+  inputs: { run: nsw_outside_callback }
+  expect: { escalation: state-scope, end_state: SX-ESCALATE, reference: true }
+- id: T-8-02
+  gate: G-T6
+  channel: web
+  desc: "'not_listed' accident type routes to a human callback immediately (lead captured)"
+  inputs: { run: unmapped_type_callback }
+  expect: { escalation: unmapped-accident-type, end_state: SX-ESCALATE, reference: true }
+
 coverage_assertion:
-  gates_exercised: [G-29, G-30, G-31, G-32, G-33, G-34, G-35, G-36, G-37, G-38, G-39, G-40, G-PROD-LOCK, G-VER]
+  gates_exercised: [G-29, G-30, G-31, G-32, G-33, G-34, G-35, G-36, G-37, G-38, G-39, G-40, G-PROD-LOCK, G-VER, G-T6, G-T4]
   crs_covered: [CR-3-01, CR-3-02, CR-3-04]
   voice_engine_parity: true
   regression: stage2_30_green

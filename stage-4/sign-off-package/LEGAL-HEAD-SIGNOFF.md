@@ -5,7 +5,7 @@
 This is a **yes/no** review. You are confirming that (a) the **fault rules** the system applies are legally sound, (b) the **exact words shown to the public** are acceptable, and (c) the **safety behaviours** (disclaimers, escalation, no definitive fault) are correct.
 
 - **You do not edit code.** Tick **YES** to approve an item as written, or **NO** + a one-line note on what to change. The dev loop (Cursor/MiniMax build → Opus audit) implements every change; nothing ships without your YES.
-- **Two groups below:** **LIVE** = already built, tested (75/75), running in staging — these need sign-off to launch Stage 1. **PROPOSED (Phase 2)** = drafted but **not yet coded** — your yes/no here decides what we build next, so we don't code something you'd reject (saves the redo).
+- **Two groups below:** **LIVE** = already built, tested (99/99; was 87/87 pre-T4/T6/T8, 79/79 pre-T6, 75/75 pre-MFA, 73/73 pre-Stage-2.5), running in staging — these need sign-off to launch Stage 1. **PROPOSED (Phase 2)** = drafted but **not yet coded** — your yes/no here decides what we build next, so we don't code something you'd reject (saves the redo).
 - **The system never states definitive fault and never shows a percentage.** It gives a *band* — likely / possible / unclear / insufficient — always with a disclaimer, and routes anything sensitive to a human.
 
 ---

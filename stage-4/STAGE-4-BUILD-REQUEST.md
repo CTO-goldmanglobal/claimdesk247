@@ -84,7 +84,7 @@ Two outputs: (1) a working staging URL; (2) the sign-off package (Loop Request ย
 | G-59 | `x-test-mode` confirmed inert in production config | P1 |
 | G-60 | All carry-in CRs (5-01, 5-04, 4-01, 4-02) landed and evidenced | P1 |
 | G-61 | Sign-off package complete: all 8 Loop Request ยง12 items assembled | P0 |
-| G-62 | Regression: 73/73 still green against the deployed API (weblink runner) | P0 |
+| G-62 | Regression: 99/99 still green against the deployed API (weblink runner; pre-T4/T6/T8 was 87, pre-T6 was 79, pre-MFA was 75, pre-Stage-2.5 was 73) | P0 |
 
 ---
 

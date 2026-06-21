@@ -34,7 +34,7 @@ This package is the **single consolidated deliverable** for legal-firm sign-off 
 
 The engine is deployed in Sydney and the deployer-evidence has now been **captured live** — this section supersedes the "to capture" notes above where they overlap.
 
-- **Scored regression (Items 1–5, 8):** `75/75` against the deployed engine (18/18 Stage 2.5 + 30/30 Stage 2 + 27/27 Stage 3). Report: `stage-2.5/deliverables/test-report.txt`. Closes gates G-51 + G-62.
+- **Scored regression (Items 1–5, 8):** `79/79` against the deployed engine (18/18 Stage 2.5 + 30/30 Stage 2 + 31/31 Stage 3 — Stage 3 went from 27 to 31 with T-1-01..04 added by G-PROD-LOCK/G-VER 2026-06-15). Report: `stage-2.5/deliverables/test-report.txt`. Closes gates G-51 + G-62.
 - **Item 1 (disclaimers):** T-25-003 green live — `disclaimerText` populated, zero unresolved tokens.
 - **Item 2 (rule tree):** live classifications return valid bands with verbatim framing, no percentages (verified web intake → `likely`).
 - **Item 3 (escalation):** T-25-005/006 green; serious-injury path returns the calm handoff with no fault band.
@@ -162,6 +162,7 @@ These are not blockers for sign-off; they are tokens that resolve at Stage 5 dep
 | `{{RETENTION_PERIOD}}` | "7 years" | |
 | `{{TOW_PROVIDER_REF}}` | "TOW-GF-001" | |
 | `{{RENTAL_PARTNER_REF}}` | "RENT-GF-001" | |
+| `{{OPERATOR_NAME}}` | *(none — pending Legal Head)* | **NEW: who operates claimdesk247.com.au (firm or ClaimDesk entity — not Goldman Forge Legal, not Goldman Global Financial Pty Ltd)** |
 | Insurer correspondence (§7) | not yet drafted | (a) build / (b) Phase 2 |
 
 ---
@@ -174,6 +175,7 @@ These are not blockers for sign-off; they are tokens that resolve at Stage 5 dep
 | CR-5-05 | MFA: frontend TOTP/AAL2 enrol+challenge+gate **DONE + enforced** (2026-06-14). Remaining = server-side AAL2 JWT-claim check on engine `/api/brief` (still `X-MFA-Verified` stub). | P1 |
 | CR-5-06 | Replace in-process token bucket with Vercel Edge Config / Upstash Redis (CR-5-03 production). | P2 |
 | CR-5-07 | Wire the production `{{FIRM_*}}` token values (per §14). | P1 |
+| CR-6-01 | **Brand framing correction (Jun 20, 2026).** claimdesk247.com.au is independent of Goldman Forge; operator = `{{OPERATOR_NAME}}` (firm/ClaimDesk entity, pending Legal Head). Do not ship "Goldman Global Financial Pty Ltd" or "Goldman Forge Legal" as operator. Footer = "ClaimDesk 247 — built on ForgeWright (a Goldman Forge product). Operated by `{{OPERATOR_NAME}}`." No back-link to goldmanglobal.com.au. (Reflected in `CTO-Build-Order-ClaimDesk-2026-06-14.md` CD-N1 and `ClaimDesk-AUDIT-TREE.md` CD-L3 + CD-E3.) | P0 |
 
 ---
 

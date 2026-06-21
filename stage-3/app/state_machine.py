@@ -15,7 +15,10 @@ import secrets
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from app.engine import classify, EngineResult, EngineBandError, _check_global_escalations
+from app.engine import (
+    classify, EngineResult, EngineBandError, _check_global_escalations,
+    _resolve_scenario, _scenario_by_id, ACCIDENT_TYPE_TO_SCENARIO,
+)
 
 # Session identifier (in-memory for Stage 2; replaceable at Stage 4 with
 # Australian-region persistent store).
@@ -33,13 +36,16 @@ class Session:
     reference: str | None = None
     created_at: str = "2026-06-13T00:00:00Z"  # dev timestamp; Stage 4+ uses real time
     pii_persisted: bool = False  # G-22: only True after consent
+    # T6: scenario-question injection (additive — empty until S3.5 begins)
+    scenario_questions: list[dict[str, Any]] = field(default_factory=list)
+    scenario_questions_answered: list[dict[str, Any]] = field(default_factory=list)
 
 
 # Slot definitions (from spec/conversation-flow.v1.md §2, order fixed)
 SLOT_DEFINITIONS: list[dict[str, Any]] = [
-    {"id": 1, "slot": "state_of_accident", "type": "enum", "options": ["NSW", "QLD", "VIC", "TAS", "SA", "WA", "ACT", "NT"], "mandatory": True},
+    {"id": 1, "slot": "state_of_accident", "type": "enum", "options": ["NSW", "outside_nsw"], "mandatory": True},
     {"id": 2, "slot": "datetime_location", "type": "text", "mandatory": True},
-    {"id": 3, "slot": "accident_type", "type": "enum", "options": ["rear-end", "T-intersection", "roundabout", "merge", "reversing", "parking", "other"], "mandatory": True},
+    {"id": 3, "slot": "accident_type", "type": "enum", "options": ["rear-end", "T-intersection", "roundabout", "merge", "reversing", "car_park", "parked_hit", "intersection_signalised", "turning_right", "sideswipe_same_direction", "multi_vehicle", "not_listed"], "mandatory": True},
     {"id": 4, "slot": "user_vehicle", "type": "text", "mandatory": True},
     {"id": 5, "slot": "other_vehicles", "type": "text", "mandatory": True},
     {"id": 6, "slot": "movement_description", "type": "text", "mandatory": True},
@@ -72,6 +78,11 @@ def _validate_slot(slot_def: dict[str, Any], value: Any) -> tuple[bool, str | No
     elif t == "text":
         if not isinstance(value, str) or len(value.strip()) < 1:
             return False, "Please enter a value."
+    elif t == "integer":
+        try:
+            int(value)
+        except (TypeError, ValueError):
+            return False, "Please enter a whole number."
     return True, None
 
 
@@ -139,13 +150,27 @@ def submit_slot(session: Session, slot_id: int, value: Any) -> dict[str, Any]:
         session.reference = _new_reference()
         return {"escalation": "esc-injury", "end_state": "SX-ESCALATE", "reference": session.reference}
 
-    # State-scope guard after slot 1 (G-21)
+    # State-scope guard after slot 1 (G-21). NSW-only product: anything other
+    # than NSW (the dropdown offers "outside_nsw") routes to a human callback —
+    # the lead is captured, not dead-ended.
     if slot_def["slot"] == "state_of_accident" and value != "NSW":
         session.state = "SX-ESCALATE"
         session.escalation = "state-scope"
         session.escalation_reason = f"non-NSW accident: {value}"
         session.reference = _new_reference()
         return {"state_scope_guard_shown": True, "escalation": "callback",
+                "end_state": "SX-ESCALATE", "reference": session.reference}
+
+    # Accident-type fast-fail (T6 §6.7): if the chosen type has no auto-band
+    # scenario (e.g. "not_listed" / anything unmapped), route to a human
+    # callback immediately rather than asking 11 more slots and then dead-ending.
+    # Captures the lead with a reference instead of letting the customer leave.
+    if slot_def["slot"] == "accident_type" and value not in ACCIDENT_TYPE_TO_SCENARIO:
+        session.state = "SX-ESCALATE"
+        session.escalation = "unmapped-accident-type"
+        session.escalation_reason = f"accident_type has no auto-band scenario: {value}"
+        session.reference = _new_reference()
+        return {"escalation": "callback", "unmapped_accident_type": True,
                 "end_state": "SX-ESCALATE", "reference": session.reference}
 
     # Move to next slot
@@ -163,6 +188,13 @@ def run_classification(session: Session) -> EngineResult:
         raise RuntimeError("classification attempted without consent")
     if not session.pii_persisted:
         raise RuntimeError("classification attempted with no PII persisted")
+
+    # T6: mirror the web-intake slot name onto the engine's canonical key so the
+    # state-machine path is engine-callable. The fixed intake stores
+    # `state_of_accident`; the engine resolves the scenario from `state`.
+    # Additive only — never overwrites an explicitly-set `state`.
+    if not session.intake.get("state") and session.intake.get("state_of_accident"):
+        session.intake["state"] = session.intake["state_of_accident"]
 
     # If any of the global escalations are positive, we still call classify()
     # so the engine produces a deterministic result; the test runner asserts
@@ -209,3 +241,123 @@ def abandon(session: Session) -> str | None:
 
 def _new_reference() -> str:
     return "GF-" + secrets.token_hex(4).upper()
+
+
+# ----------------------------------------------------------------------
+# T6 — Scenario-question injection (L1 dependency)
+#
+# After the fixed 14 slots are filled (state S4-CLASSIFY), the resolved
+# scenario's `classification_questions` are asked one at a time. Each answer
+# is persisted into `session.intake` under the question's `slot` name so the
+# engine's band functions have their inputs. Purely additive: the fixed-slot
+# flow (`submit_slot`) and existing endpoints are unchanged. The orchestrator
+# (web layer) calls `start_scenario_questions` once after slot 14, then
+# `submit_scenario_question` per answer, then `/api/classify` as before.
+# ----------------------------------------------------------------------
+
+SCENARIO_REPROMPT_CAP = 2  # G-26 (mirrors the fixed-slot cap)
+
+
+def _get_scenario_questions(intake: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Return the resolved scenario's classification_questions, or None if no
+    scenario resolves (e.g. accident_type missing/unmapped). Never raises."""
+    scenario_id = _resolve_scenario(intake)
+    if not scenario_id:
+        return None
+    try:
+        scenario = _scenario_by_id(scenario_id)
+    except Exception:
+        return None
+    return scenario.get("classification_questions", [])
+
+
+def _validate_scenario_question(q: dict[str, Any], value: Any) -> tuple[bool, str | None]:
+    """Validate a value against a scenario question's answer_type/options.
+    Shape validation only — business-rule ranges (e.g. chain_count >= 3) are
+    enforced by the engine's band logic, not here."""
+    answer_type = q.get("answer_type", "text")
+    if value is None or value == "":
+        return False, "This field is required."
+    if answer_type == "enum":
+        if value not in q.get("options", []):
+            return False, f"Please choose one of: {', '.join(q.get('options', []))}."
+    elif answer_type == "multienum":
+        vals = [v.strip() for v in value.split(",")] if isinstance(value, str) else value
+        if not isinstance(vals, list) or not all(v in q.get("options", []) for v in vals):
+            return False, f"Please choose from: {', '.join(q.get('options', []))}."
+    elif answer_type == "text":
+        if not isinstance(value, str) or len(value.strip()) < 1:
+            return False, "Please enter a value."
+    elif answer_type == "integer":
+        try:
+            int(value)
+        except (TypeError, ValueError):
+            return False, "Please enter a whole number."
+    return True, None
+
+
+def start_scenario_questions(session: Session) -> dict[str, Any]:
+    """Begin the scenario-question phase. Call once after the 14 fixed slots
+    are filled (state S4-CLASSIFY). If the resolved scenario has questions,
+    transition to S3.5-INJECT-QUESTIONS and return the first one; otherwise
+    pass straight through to classify."""
+    if session.state != "S4-CLASSIFY":
+        raise RuntimeError(f"cannot start scenario questions from state {session.state}")
+    questions = _get_scenario_questions(session.intake)
+    if not questions:
+        return {"state": "S4-CLASSIFY", "question": None,
+                "total_questions": 0, "answered": 0, "ready_to_classify": True}
+    session.state = "S3.5-INJECT-QUESTIONS"
+    session.scenario_questions = list(questions)
+    session.scenario_questions_answered = []
+    return {"state": "S3.5-INJECT-QUESTIONS", "question": questions[0],
+            "total_questions": len(questions), "answered": 0}
+
+
+def _current_scenario_question(session: Session) -> dict[str, Any] | None:
+    answered_ids = {a["id"] for a in session.scenario_questions_answered}
+    return next((q for q in session.scenario_questions if q["id"] not in answered_ids), None)
+
+
+def submit_scenario_question(session: Session, question_id: str, value: Any) -> dict[str, Any]:
+    """Submit an answer to the current scenario question. Validates, persists
+    into session.intake under the question's slot, and advances. After the last
+    question, transitions back to S4-CLASSIFY (ready_to_classify=True)."""
+    if session.state != "S3.5-INJECT-QUESTIONS":
+        raise RuntimeError(f"cannot submit scenario question from state {session.state}")
+    current = _current_scenario_question(session)
+    if current is None:
+        raise RuntimeError("no scenario question pending")
+    # question_id is optional: when omitted (None) the answer applies to the
+    # current question (the frontend doesn't need to track question ids).
+    if question_id is None:
+        question_id = current["id"]
+    if current["id"] != question_id:
+        raise RuntimeError(f"question_id mismatch: expected {current['id']}, got {question_id}")
+
+    valid, err = _validate_scenario_question(current, value)
+    if not valid:
+        key = current["slot"]
+        session.reprompts[key] = session.reprompts.get(key, 0) + 1
+        if session.reprompts[key] > SCENARIO_REPROMPT_CAP:
+            session.state = "SX-ESCALATE"
+            session.escalation = "reprompt-cap"
+            session.escalation_reason = f"max re-prompts on scenario slot {key}"
+            session.reference = session.reference or _new_reference()
+            return {"escalation": "reprompt-cap", "end_state": "SX-ESCALATE",
+                    "reference": session.reference}
+        return {"reprompt": True, "error": err, "reprompt_count": session.reprompts[key]}
+
+    session.intake[current["slot"]] = value
+    session.pii_persisted = True  # G-22: scenario answers may be PII
+    session.scenario_questions_answered.append({"id": current["id"], "value": value})
+
+    next_q = _current_scenario_question(session)
+    if next_q is None:
+        session.state = "S4-CLASSIFY"
+        return {"accepted": True, "next_question": None, "ready_to_classify": True,
+                "answered": len(session.scenario_questions_answered),
+                "total_questions": len(session.scenario_questions)}
+    return {"accepted": True, "next_question": next_q, "ready_to_classify": False,
+            "answered": len(session.scenario_questions_answered),
+            "total_questions": len(session.scenario_questions)}

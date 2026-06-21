@@ -43,7 +43,7 @@ Capture: screenshots + the session reference for each, into `stage-4/sign-off-pa
 - [ ] Service-role key not in client bundle
 
 **Correctness**
-- [ ] 73/73 green against deployed API (G-62)
+- [ ] 99/99 green against deployed API (G-62; Stage 2 30 + Stage 3 50 + Stage 2.5 19; was 87/87 pre-T4/T6/T8, 79/79 pre-T1, 75/75 pre-MFA, 73/73 pre-Stage-2.5). *Verified 2026-06-21 03:10 UTC+10 post-fast-forward.*
 - [ ] Supabase adapter passes full suite (G-51)
 - [ ] All Part A QA journeys pass (G-58)
 - [ ] Carry-in CRs landed: 5-01, 5-04, 4-01, 4-02 (G-60)

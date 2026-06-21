@@ -34,8 +34,8 @@ stage-4/                # copy (app/supabase_store.py)
 ```bash
 pip install -r requirements.txt -r stage-2.5/requirements-dev.txt
 (cd stage-2   && PYTHONPATH=. python3 tests/run_acceptance.py)   # 30
-(cd stage-3   && PYTHONPATH=. python3 tests/run_acceptance.py)   # 27
-(cd stage-2.5 && python3 tests/run_acceptance.py)                # 18 + regression  → 75/75
+(cd stage-3   && PYTHONPATH=. python3 tests/run_acceptance.py)   # 31 (was 27 pre-T1; gained T-1-01..04)
+(cd stage-2.5 && python3 tests/run_acceptance.py)                # 19 + regression  → 99/99
 uvicorn api.index:app --port 8000          # smoke: GET /healthz returns versions
 ```
 If the F-A wiring has an interface bug, it surfaces here — fix before deploying.
@@ -67,7 +67,7 @@ CORS_EXPECTED_ORIGIN=https://claimdesk247.com.au \
 python3 stage-4/scripts/preflight.py
 BASE_URL=https://claimdesk247-engine.vercel.app python3 stage-2.5/tests/run_acceptance.py
 ```
-This closes: **G-50** (staging live), **G-51** (adapter vs real store), **G-55** (CORS), **G-56** (rate limit), **G-59** (test-mode inert), **G-60** (CRs), **G-62** (73/73 regression). Then run QA-PLAN Part A (13 journeys) for **G-58**.
+This closes: **G-50** (staging live), **G-51** (adapter vs real store), **G-55** (CORS), **G-56** (rate limit), **G-59** (test-mode inert), **G-60** (CRs), **G-62** (99/99 regression as of 2026-06-21; was 87/87 pre-T4/T6/T8, 79/79 pre-T6, 75/75 pre-MFA, 73/73 pre-Stage-2.5). Then run QA-PLAN Part A (13 journeys) for **G-58**.
 
 ---
 

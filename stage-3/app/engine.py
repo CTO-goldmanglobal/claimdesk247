@@ -56,6 +56,14 @@ ACCIDENT_TYPE_TO_SCENARIO: dict[str, str] = {
     "reversing": "s5-reversing",
     "parking": "s5-reversing",  # parking is treated as reversing
     "other": "s6-multi-chain",
+    # Phase-2 Tier-1 (v3.1.0) — scenarios s7–s10
+    "car_park": "s7-car-park",
+    "intersection_signalised": "s8-signalised-intersection",
+    "turning_right": "s9-right-turn-oncoming",
+    "sideswipe_same_direction": "s10-sideswipe-same-direction",
+    # Intake-clarity additions (v3.1.0)
+    "parked_hit": "s11-parked-vehicle",   # user's parked car was struck
+    "multi_vehicle": "s6-multi-chain",     # clear user-facing label for 3+ vehicles
 }
 
 # Field-name normalisation. Test inputs use free-form keys; the scenarios use
@@ -344,6 +352,16 @@ def _assign_band(scenario: dict[str, Any], intake: dict[str, Any],
         return _band_s5(intake, exceptions_fired)
     if sid == "s6-multi-chain":
         return _band_s6(intake, exceptions_fired, damage_consistent)
+    if sid == "s7-car-park":
+        return _band_s7(intake, exceptions_fired)
+    if sid == "s8-signalised-intersection":
+        return _band_s8(intake, exceptions_fired)
+    if sid == "s9-right-turn-oncoming":
+        return _band_s9(intake, exceptions_fired)
+    if sid == "s10-sideswipe-same-direction":
+        return _band_s10(intake, exceptions_fired)
+    if sid == "s11-parked-vehicle":
+        return _band_s11(intake, exceptions_fired)
     raise EngineBandError(f"no band logic for scenario: {sid}")
 
 
@@ -426,6 +444,98 @@ def _band_s6(intake: dict[str, Any], exc: list[str], damage_consistent: bool) ->
     # T-2-017: chain_count=2, multi_complex=yes -> unclear
     if is_positive(intake.get("multi_complex")):
         return "unclear"
+    return "unclear"
+
+
+# ----------------------- Phase-2 Tier-1 band functions (s7–s10, v3.1.0) ----------------------- #
+# Common pre-checks (incomplete -> insufficient; a fired flag_unclear exception
+# or inconsistent damage -> unclear) are applied in _assign_band BEFORE these
+# run. Each function reproduces its scenario's band_logic deterministically and
+# returns "insufficient" if the discriminating classification answers are absent.
+
+_CP_MANOEUVRING = {"reversing_from_bay", "entering_bay"}
+
+
+def _band_s7(intake: dict[str, Any], exc: list[str]) -> str:
+    """Car park / parking-lot manoeuvre."""
+    u = intake.get("cp_user_role")
+    o = intake.get("cp_other_role")
+    if not u or not o:
+        return "insufficient"
+    if u in _CP_MANOEUVRING and o in _CP_MANOEUVRING:
+        return "unclear"  # both manoeuvring (s7-e2 flag_unclear also covers this)
+    if "s7-e1" in exc:
+        return "possible"  # aisle vehicle partly at fault (downgrade)
+    if (u == "driving_in_aisle" and o in _CP_MANOEUVRING) or \
+       (o == "driving_in_aisle" and u in _CP_MANOEUVRING):
+        return "likely"
+    return "unclear"  # both stationary / both aisle / ambiguous roles
+
+
+def _band_s8(intake: dict[str, Any], exc: list[str]) -> str:
+    """Signalised (traffic-light) intersection."""
+    light = intake.get("sig_user_light")
+    movement = intake.get("sig_user_movement")
+    if not light or not movement:
+        return "insufficient"
+    if light == "unsure":
+        return "unclear"  # light state not certain (s8-e2 flag_unclear also covers this)
+    if "s8-e1" in exc or light == "yellow":
+        return "possible"  # entered on yellow (downgrade)
+    if light in ("green", "green_arrow", "red"):
+        return "likely"  # clear signal state on one side -> the other was opposite
+    return "unclear"
+
+
+def _band_s9(intake: dict[str, Any], exc: list[str]) -> str:
+    """Right turn across oncoming traffic."""
+    role = intake.get("rt_user_role")
+    signal = intake.get("rt_signal")
+    if not role or not signal:
+        return "insufficient"
+    if role == "unsure" or signal == "unsure":
+        return "unclear"
+    if signal == "green_arrow":
+        return "unclear"  # turning driver had a green arrow (s9-e1 flag_unclear also covers this)
+    if "s9-e2" in exc:
+        return "possible"  # oncoming driver at-fault factor (downgrade)
+    if role in ("going_straight", "turning_right"):
+        return "likely"  # clear right-turn give-way pattern
+    return "unclear"
+
+
+def _band_s10(intake: dict[str, Any], exc: list[str]) -> str:
+    """Sideswipe, both vehicles travelling the same direction."""
+    u = intake.get("ss_user_lane")
+    o = intake.get("ss_other_lane")
+    if not u or not o:
+        return "insufficient"
+    if u == "unsure" or o == "unsure":
+        return "unclear"
+    if u == "changing_lane" and o == "changing_lane":
+        return "unclear"  # both changing (s10-e1 flag_unclear also covers this)
+    if "s10-e2" in exc:
+        return "possible"  # lane-holder partly over the line (downgrade)
+    if (u == "holding_lane" and o == "changing_lane") or \
+       (o == "holding_lane" and u == "changing_lane"):
+        return "likely"
+    return "unclear"  # both holding -> ambiguous
+
+
+def _band_s11(intake: dict[str, Any], exc: list[str]) -> str:
+    """Parked / stationary vehicle struck by a moving vehicle."""
+    motion = intake.get("pv_user_motion")
+    legal = intake.get("pv_parking_legal")
+    if not motion or not legal:
+        return "insufficient"
+    if motion == "moving":
+        return "unclear"  # not actually a parked-vehicle case
+    if legal == "unsure":
+        return "unclear"
+    if legal == "no" or "s11-e1" in exc:
+        return "possible"  # parked illegally / obstructing (contributory)
+    if motion in ("parked_stationary", "just_stopped") and legal == "yes":
+        return "likely"
     return "unclear"
 
 

@@ -17,7 +17,7 @@ Two review layers, correctly separated: **code audit = is it built right** (auto
 ---
 
 ## Gates that EXIST and hold
-Stage 4 gate set G-50…G-62 (deploy, AU residency, RLS, append-only, CORS, rate-limit, MFA, regression 75/75, sign-off package). These are solid and now mostly green.
+Stage 4 gate set G-50…G-62 (deploy, AU residency, RLS, append-only, CORS, rate-limit, MFA, regression 99/99 as of 2026-06-21 [was 87/87 pre-T4/T6/T8, 79/79 pre-T6, 75/75 pre-MFA, 73/73 pre-Stage-2.5], sign-off package). These are solid and now mostly green.
 
 ## Gates that are MISSING (the holes that cause "incomplete loop")
 Ordered by risk. P0 = add before the next loop closes; P1 = add this stage.

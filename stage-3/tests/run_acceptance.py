@@ -30,7 +30,7 @@ from app.intake_brief import (
 )
 from app.state_machine import (
     SLOT_DEFINITIONS, Session, acknowledge_consent, new_session, run_classification,
-    submit_slot,
+    submit_slot, start_scenario_questions, submit_scenario_question,
 )
 from app.store import InMemoryStore
 from app.voice import (
@@ -460,8 +460,8 @@ def _drive_rule_tree_v3_clean(case: dict) -> tuple[bool, str]:
     """G-38 / CR-3-04: no out-of-enum bands anywhere in rule tree v3."""
     from app.engine import _load_rule_tree
     tree = _load_rule_tree()
-    if tree.get("version") != "3.0.0":
-        return False, f"expected version 3.0.0, got {tree.get('version')!r}"
+    if not str(tree.get("version", "")).startswith("3."):
+        return False, f"expected a 3.x rule-tree version, got {tree.get('version')!r}"
     VALID = {"likely", "possible", "unclear", "insufficient"}
     out = []
     for s in tree.get("scenarios", []):
@@ -773,6 +773,196 @@ def _drive_signoff_hash_deterministic(case: dict) -> tuple[bool, str]:
 
 
 # -----------------------------------------------------------------------
+# T6 — scenario-question injection (L1 dependency)
+# -----------------------------------------------------------------------
+
+def _t6_ready_session(accident_type: str = "rear-end") -> Session:
+    """A session past consent + the 14 fixed slots, at S4-CLASSIFY, ready for
+    the scenario-question phase."""
+    s = new_session()
+    acknowledge_consent(s, privacy_acknowledged=True)
+    s.intake.update({
+        "state_of_accident": "NSW", "accident_type": accident_type,
+        "datetime_location": "x", "user_vehicle": "x", "other_vehicles": "x",
+        "movement_description": "x", "damage_locations": ["rear"],
+        "control_devices": "none", "police_attendance": "no", "injuries": "none",
+    })
+    s.pii_persisted = True
+    s.state = "S4-CLASSIFY"
+    return s
+
+
+def _drive_t6_start(case: dict) -> tuple[bool, str]:
+    s = _t6_ready_session()
+    r = start_scenario_questions(s)
+    if s.state != "S3.5-INJECT-QUESTIONS":
+        return False, f"state {s.state} != S3.5-INJECT-QUESTIONS"
+    q = r.get("question")
+    if not q or q["id"] != "s1-q1":
+        return False, f"unexpected first question: {q}"
+    return True, f"start -> {q['id']} ({q['slot']}); total={r['total_questions']}"
+
+
+def _drive_t6_advance(case: dict) -> tuple[bool, str]:
+    s = _t6_ready_session()
+    start_scenario_questions(s)
+    r = submit_scenario_question(s, "s1-q1", "front")
+    if not r.get("accepted") or (r.get("next_question") or {}).get("id") != "s1-q2":
+        return False, f"advance result {r}"
+    if s.intake.get("user_position") != "front":
+        return False, "answer not persisted to intake"
+    return True, f"q1 accepted -> next {r['next_question']['id']}"
+
+
+def _drive_t6_complete(case: dict) -> tuple[bool, str]:
+    s = _t6_ready_session()
+    start_scenario_questions(s)
+    submit_scenario_question(s, "s1-q1", "front")
+    submit_scenario_question(s, "s1-q2", "stopped")
+    r = submit_scenario_question(s, "s1-q3", 2)
+    if not r.get("ready_to_classify") or s.state != "S4-CLASSIFY":
+        return False, f"not ready: {r}, state {s.state}"
+    for k in ("user_position", "user_motion", "chain_count"):
+        if k not in s.intake:
+            return False, f"missing {k} in intake"
+    return True, "all answered; ready_to_classify; scenario slots in intake"
+
+
+def _drive_t6_reprompt(case: dict) -> tuple[bool, str]:
+    s = _t6_ready_session()
+    start_scenario_questions(s)
+    r = submit_scenario_question(s, "s1-q1", "sideways")  # not in options
+    if not r.get("reprompt") or s.state != "S3.5-INJECT-QUESTIONS":
+        return False, f"expected reprompt, got {r} (state {s.state})"
+    return True, f"invalid value -> reprompt_count={r['reprompt_count']}"
+
+
+def _drive_t6_reprompt_cap(case: dict) -> tuple[bool, str]:
+    s = _t6_ready_session()
+    start_scenario_questions(s)
+    submit_scenario_question(s, "s1-q1", "bad1")
+    submit_scenario_question(s, "s1-q1", "bad2")
+    r = submit_scenario_question(s, "s1-q1", "bad3")  # 3rd > cap(2) -> escalate
+    if r.get("escalation") != "reprompt-cap" or s.state != "SX-ESCALATE":
+        return False, f"expected reprompt-cap escalation, got {r} (state {s.state})"
+    if not s.reference:
+        return False, "no reference issued on escalation"
+    return True, "reprompt cap -> SX-ESCALATE + reference"
+
+
+def _drive_t6_integer(case: dict) -> tuple[bool, str]:
+    s = _t6_ready_session()
+    start_scenario_questions(s)
+    submit_scenario_question(s, "s1-q1", "front")
+    submit_scenario_question(s, "s1-q2", "stopped")
+    bad = submit_scenario_question(s, "s1-q3", "not-a-number")
+    if not bad.get("reprompt"):
+        return False, f"integer reject failed: {bad}"
+    good = submit_scenario_question(s, "s1-q3", "3")
+    if not good.get("ready_to_classify"):
+        return False, f"integer accept failed: {good}"
+    return True, "integer type: rejects non-int, accepts int"
+
+
+def _drive_t6_no_scenario(case: dict) -> tuple[bool, str]:
+    s = new_session()
+    acknowledge_consent(s, privacy_acknowledged=True)
+    s.intake.update({"state_of_accident": "NSW"})  # no accident_type -> no scenario resolves
+    s.pii_persisted = True
+    s.state = "S4-CLASSIFY"
+    r = start_scenario_questions(s)
+    if not r.get("ready_to_classify") or r.get("question") is not None or s.state != "S4-CLASSIFY":
+        return False, f"expected passthrough, got {r} (state {s.state})"
+    return True, "no scenario -> straight to classify (no questions)"
+
+
+# -----------------------------------------------------------------------
+# Dispatch table
+# -----------------------------------------------------------------------
+
+# -----------------------------------------------------------------------
+# T4/T5 — Phase-2 Tier-1 scenarios (s7–s10, rule tree v3.1.0)
+# -----------------------------------------------------------------------
+
+def _signed_classify(intake: dict) -> EngineResult:
+    """Classify against a copy of the live rule tree with every scenario signed
+    against the current content hash, so band logic is exercised past
+    G-PROD-LOCK. Reads the tree from disk (not the possibly-patched loader),
+    patches the engine loader for the call, then restores it."""
+    import copy
+    import app.engine as _eng
+    from app.engine import _load_rule_tree as _canonical, _compute_scenarios_hash
+    real = json.loads((STAGE3_DIR / "app" / "data" / "rule-tree.nsw.v3.json").read_text())
+    fake = copy.deepcopy(real)
+    h = _compute_scenarios_hash(fake)
+    for s in fake["scenarios"]:
+        s["legal_signoff"] = {"approved": True, "version": h, "by": "Legal Head (test)", "date": "2026-06-20"}
+    _eng._load_rule_tree = lambda: fake
+    try:
+        return classify(intake)
+    finally:
+        _eng._load_rule_tree = _canonical
+        try:
+            _canonical.cache_clear()
+        except Exception:
+            pass
+
+
+def _t7(accident_type: str, extra: dict, expect_band: str, expect_sid: str) -> tuple[bool, str]:
+    intake = {"state": "NSW", "accident_type": accident_type, "injuries": "none", **extra}
+    r = _signed_classify(intake)
+    if r.scenario_id != expect_sid:
+        return False, f"scenario {r.scenario_id!r} != {expect_sid!r} (escalation={r.escalation!r})"
+    if r.band != expect_band:
+        return False, f"band {r.band!r} != {expect_band!r}"
+    return True, f"{expect_sid} -> {r.band}"
+
+
+def _drive_t7_carpark_likely(case): return _t7("car_park", {"cp_user_role": "driving_in_aisle", "cp_other_role": "reversing_from_bay"}, "likely", "s7-car-park")
+def _drive_t7_carpark_unclear(case): return _t7("car_park", {"cp_user_role": "reversing_from_bay", "cp_other_role": "reversing_from_bay"}, "unclear", "s7-car-park")
+def _drive_t7_signal_likely(case): return _t7("intersection_signalised", {"sig_user_light": "green", "sig_user_movement": "straight"}, "likely", "s8-signalised-intersection")
+def _drive_t7_signal_unclear(case): return _t7("intersection_signalised", {"sig_user_light": "unsure", "sig_user_movement": "straight"}, "unclear", "s8-signalised-intersection")
+def _drive_t7_rightturn_likely(case): return _t7("turning_right", {"rt_user_role": "going_straight", "rt_signal": "green_no_arrow"}, "likely", "s9-right-turn-oncoming")
+def _drive_t7_rightturn_unclear(case): return _t7("turning_right", {"rt_user_role": "going_straight", "rt_signal": "green_arrow"}, "unclear", "s9-right-turn-oncoming")
+def _drive_t7_sideswipe_likely(case): return _t7("sideswipe_same_direction", {"ss_user_lane": "holding_lane", "ss_other_lane": "changing_lane"}, "likely", "s10-sideswipe-same-direction")
+def _drive_t7_sideswipe_unclear(case): return _t7("sideswipe_same_direction", {"ss_user_lane": "changing_lane", "ss_other_lane": "changing_lane"}, "unclear", "s10-sideswipe-same-direction")
+def _drive_t7_parked_likely(case): return _t7("parked_hit", {"pv_user_motion": "parked_stationary", "pv_parking_legal": "yes", "pv_occupant": "no"}, "likely", "s11-parked-vehicle")
+def _drive_t7_parked_possible(case): return _t7("parked_hit", {"pv_user_motion": "parked_stationary", "pv_parking_legal": "no", "pv_occupant": "yes"}, "possible", "s11-parked-vehicle")
+
+
+# -----------------------------------------------------------------------
+# Intake-clarity changes: NSW-only callback + unmapped-type callback
+# -----------------------------------------------------------------------
+
+def _drive_nsw_outside_callback(case: dict) -> tuple[bool, str]:
+    """#1 NSW-only: choosing 'outside_nsw' routes to a human callback with a
+    reference (lead captured), not a dead end."""
+    s = new_session()
+    acknowledge_consent(s, privacy_acknowledged=True)
+    submit_slot(s, 1, "outside_nsw")
+    if s.state != "SX-ESCALATE" or s.escalation != "state-scope":
+        return False, f"state={s.state} escalation={s.escalation}"
+    if not s.reference:
+        return False, "no reference issued (lead not captured)"
+    return True, "outside_nsw -> callback + reference"
+
+
+def _drive_unmapped_type_callback(case: dict) -> tuple[bool, str]:
+    """#3 'Something else / not sure' (not_listed) routes to a human callback
+    immediately, instead of asking 11 more slots and dead-ending."""
+    s = new_session()
+    acknowledge_consent(s, privacy_acknowledged=True)
+    submit_slot(s, 1, "NSW")
+    submit_slot(s, 2, "x")
+    submit_slot(s, 3, "not_listed")
+    if s.state != "SX-ESCALATE" or s.escalation != "unmapped-accident-type":
+        return False, f"state={s.state} escalation={s.escalation}"
+    if not s.reference:
+        return False, "no reference issued (lead not captured)"
+    return True, "not_listed -> callback + reference"
+
+
+# -----------------------------------------------------------------------
 # Dispatch table
 # -----------------------------------------------------------------------
 
@@ -809,6 +999,28 @@ DISPATCH: dict[str, Callable[[dict], tuple[bool, str]]] = {
     "T-1-02": _drive_signoff_unsigned,
     "T-1-03": _drive_signoff_stale,
     "T-1-04": _drive_signoff_hash_deterministic,
+    # T6: scenario-question injection (L1 dependency)
+    "T-6-01": _drive_t6_start,
+    "T-6-02": _drive_t6_advance,
+    "T-6-03": _drive_t6_complete,
+    "T-6-04": _drive_t6_reprompt,
+    "T-6-05": _drive_t6_reprompt_cap,
+    "T-6-06": _drive_t6_integer,
+    "T-6-07": _drive_t6_no_scenario,
+    # T4/T5: Phase-2 Tier-1 scenarios (s7–s10)
+    "T-7-01": _drive_t7_carpark_likely,
+    "T-7-02": _drive_t7_carpark_unclear,
+    "T-7-03": _drive_t7_signal_likely,
+    "T-7-04": _drive_t7_signal_unclear,
+    "T-7-05": _drive_t7_rightturn_likely,
+    "T-7-06": _drive_t7_rightturn_unclear,
+    "T-7-07": _drive_t7_sideswipe_likely,
+    "T-7-08": _drive_t7_sideswipe_unclear,
+    "T-7-09": _drive_t7_parked_likely,
+    "T-7-10": _drive_t7_parked_possible,
+    # Intake-clarity: NSW-only + unmapped-type callbacks
+    "T-8-01": _drive_nsw_outside_callback,
+    "T-8-02": _drive_unmapped_type_callback,
 }
 
 

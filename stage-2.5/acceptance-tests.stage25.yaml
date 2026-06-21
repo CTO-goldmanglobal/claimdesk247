@@ -157,7 +157,18 @@ cases:
     - "GET /api/brief/:ref  (X-MFA-Verified: 1)"
   expect: { status: 200, has: [intake_fields, band, rule_refs] }
 
+- id: T-25-019
+  gate: G-T6
+  inputs: { accident_type: rear-end }
+  flow:
+    - "POST /api/session"
+    - "POST /api/consent (accept)"
+    - "fill the 14 fixed slots"
+    - "POST /api/scenario-question (start) -> first scenario question"
+    - "POST /api/scenario-question (answer s1-q1) -> next scenario question"
+  expect: { first: user_position, next: user_motion }
+
 coverage_assertion:
-  gates_exercised: [G-41, G-42, G-43, G-44, G-45, G-46, G-47, G-48, G-49, G-57]
+  gates_exercised: [G-41, G-42, G-43, G-44, G-45, G-46, G-47, G-48, G-49, G-57, G-T6]
   parity_proven: true
   runnable_against_weblink: true

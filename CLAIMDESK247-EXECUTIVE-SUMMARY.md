@@ -19,7 +19,7 @@ Most "AI" legal tools either guess (and can be wrong) or are just web forms. Cla
 - Produces a consistent, compliant, fully audit-trailed record of every interaction.
 
 ## Where it stands today (honest)
-- **Live & tested:** deployed in Sydney; full intake → guidance → customer summary; independently re-tested (75/75 automated checks); bank-grade access controls, multi-factor login for staff, and an unchangeable audit log — all verified.
+- **Live & tested:** deployed in Sydney; full intake → guidance → customer summary; independently re-tested (99/99 automated checks as of 2026-06-21; was 87/87 pre-T4/T6/T8, 79/79 pre-T6, 75/75 pre-MFA, 73/73 pre-Stage-2.5); bank-grade access controls, multi-factor login for staff, and an unchangeable audit log — all verified.
 - **Coverage today:** the 6 most common NSW collision types (rear-end, give-way/intersection, roundabout, merge, reversing, multi-vehicle) — an estimated 70–85% of typical two-car moving collisions. A further 9 scenarios are drafted and ready to add.
 - **Compliance posture:** designed around the **Privacy Act 1988** (consent-first, Australian-only data) and aligned to the **ISO/IEC 42001** AI-management standard (human oversight, transparency, lifecycle control). Formal documentation and certification are the next step, not yet complete.
 

@@ -9,7 +9,7 @@
 - **Stage:** 2.5 (Engine-as-Endpoint — thin HTTP wrapper for Lovable + weblink tests)
 - **Spec version built against:** rule-tree v3.0.0 (Stage 3), disclaimers v1, pdf-summary v1
 - **Builder run ref:** `stage-2.5/tests/run_acceptance.py` (single combined runner; local + weblink)
-- **Test report:** `deliverables/test-report.txt` — `TOTAL: 16 PASS: 16 FAIL: 0` (Stage 2.5) + `30/30` (Stage 2) + `27/27` (Stage 3) = 73/73 green
+- **Test report:** `deliverables/test-report.txt` — `TOTAL: 18 PASS: 18 FAIL: 0` (Stage 2.5 = 16 original + 2 MFA tests for G-57) + `30/30` (Stage 2) + `31/31` (Stage 3, incl. T-1-01..04 from G-PROD-LOCK/G-VER) = **79/79 green** (was 73/73 at Stage 2.5 build time, 75/75 pre-T1, 79/79 after G-PROD-LOCK/G-VER + MFA tests).
 
 ## 1. Gate self-check (G-41 .. G-49)
 Full table in `deliverables/traceability.md`. Quick summary:
@@ -72,7 +72,7 @@ python3 tests/run_acceptance.py
 ### Against a deployed weblink (Stage 4+)
 ```bash
 BASE_URL=https://<preview>.vercel.app python3 tests/run_acceptance.py
-# → same 73/73 green, but every request is real HTTP
+# → same 79/79 green, but every request is real HTTP
 ```
 
 The runner is the same file in both modes. The `HTTPClient` abstraction swaps between `TestClient` (local) and `requests` (remote) based on `BASE_URL`. Healthz is checked first; the runner aborts if the deployment is down (the underlying `requests` call will raise).
@@ -98,4 +98,4 @@ curl -H "Origin: https://evil.example.com" -I https://<preview>.vercel.app/api/s
 ```
 
 ---
-**Submitted for Fables audit. Test-based, 73/73 green across all three suites (Stage 2.5 16 + Stage 2 30 + Stage 3 27).**
+**Submitted for Fables audit. Test-based, 79/79 green across all three suites (Stage 2.5 18 [16 + 2 MFA] + Stage 2 30 + Stage 3 31 [includes T-1-01..04]). Originally 73/73 at Stage 2.5 build; 75/75 pre-T1; 79/79 after T1 closure + MFA tests.**

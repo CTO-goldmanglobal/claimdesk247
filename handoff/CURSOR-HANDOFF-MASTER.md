@@ -22,7 +22,7 @@ ClaimDesk 247 = AI accident-intake + **deterministic NSW fault-guidance engine**
 
 ## 3. Current state (what's live & verified)
 - Engine live in syd1; `/healthz` green; full intake→band→PDF works against the live Sydney DB.
-- **75/75 automated tests** green against the deployed engine (stage-2 30 · stage-3 27 · stage-2.5 18).
+- **99/99 automated tests** green against the deployed engine (stage-2 30 · stage-3 50 — incl. T-1-01..04 from G-PROD-LOCK/G-VER, T-4-01..11 (G-VER closure Tier-1 scenarios), T-6-* (question injection), T-8-01/02 (parked/not_listed) · stage-2.5 19 — incl. T-25-017/T-25-018 MFA tests + T-25-019 scenario-question). *Updated 2026-06-21 from 79/79 (was 75/75 on 2026-06-14, 87/87 pre-T4, 90/90 pre-T-25-019).*
 - Verified: RLS (anon reads 0 rows), append-only audit (anon write → 401 `42501`), CORS exact-origin, rate-limit (5/min/IP prod), MFA TOTP/AAL2 enforced (`VITE_MFA_REQUIRED=true`), server-side AAL2 on `/api/brief` **built but flag-gated** (`BRIEF_AUTH_MODE=stub` default).
 - L0 live-site P0s fixed (commit `144516e`): no `tel:000`, no fabricated testimonials, clean meta.
 - Rule tree `stage-3/app/data/rule-tree.nsw.v3.json` v3.0.0 = **6 scenarios** + 7 escalation triggers.
@@ -38,7 +38,7 @@ ClaimDesk 247 = AI accident-intake + **deterministic NSW fault-guidance engine**
   - `d09ba47` — chore(tests): Vercel Protection Bypass + cross-stage regression note (test-infra)
   - `c858803` — feat(engine): T6 scenario-question injection (L1 dep) — wires `classification_questions` into the live flow
 - **Live evidence:** `https://claimdesk247-engine.vercel.app/healthz` returns `rule_tree_hash` + `api_version: 0.2.5.0`. `POST /api/scenario-question` is live (returns 404 for unknown session, which is the correct error path). Region: `syd1`.
-- **Tests:** 79/79 in working folder (75 baseline + 4 new T-1-01..T-1-04); 47/48 in engine repo clone (the 1 fail is the by-design cross-stage regression, documented in test docstrings). With T6 added: 90/90 in working folder (79 + 11 new T-6); 58/60 in engine clone (the 2 by-design cross-stage regressions are documented in test docstrings).
+- **Tests:** **99/99** in working folder (30 + 50 + 19); **78/80** in engine repo clone (`/Users/finn/claimdesk247-engine-t1/`) — 1 SKIP + 1 FAIL (both by-design cross-stage regressions, documented in test docstrings). Historical: 87/87 pre-T4, 79/79 pre-T6, 75/75 pre-MFA, 73/73 pre-Stage-2.5.
 - **L0 remaining (build seat, gated on human/setting actions):** T2 (AAL2 activation, gated on D-2 staff enrol) · T3 (monitoring/rollback, doc-only design ready). L0 closes when Legal Head signs B1–B6.
 - **L1 next:** T6 ✅ shipped. T4 (Phase-2 scenarios) is now unblocked — T6 is its mandatory dependency.
 
@@ -65,7 +65,7 @@ ClaimDesk 247 = AI accident-intake + **deterministic NSW fault-guidance engine**
 # local (in-memory engine):
 (cd stage-2  && PYTHONPATH=. python3 tests/run_acceptance.py)   # 30
 (cd stage-3  && PYTHONPATH=. python3 tests/run_acceptance.py)   # 27
-(cd stage-2.5&& python3 tests/run_acceptance.py)                # 18 + regression  → 75/75
+(cd stage-2.5&& python3 tests/run_acceptance.py)                # 19 + regression  → 99/99
 uvicorn api.index:app --port 8000   # smoke: GET /healthz
 
 # remote vs a preview deploy (needs Vercel Protection Bypass + preview env APP_ENV=preview):

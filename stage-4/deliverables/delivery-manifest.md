@@ -14,7 +14,7 @@
 What this manifest certifies:
 - **Builder-done** (code in the repo, all automated tests green, preflight script written, sign-off package scaffolded).
 - **Code-side hardening** for all 6 carry-in CRs (CR-5-01, 5-02, 5-03, 5-04, 4-01, 4-02) is complete.
-- **75/75 automated tests pass** across Stage 2 (30), Stage 3 (27), Stage 2.5 (18).
+- **99/99 automated tests pass** across Stage 2 (30), Stage 3 (50, incl. T-1-01..04 from G-PROD-LOCK/G-VER + T-4-01..11 from G-VER + T-6-* from T6 question injection + T-8-01/02 from parked/not_listed), Stage 2.5 (19, incl. 2 MFA tests for G-57 + T-25-019 scenario-question).
 
 What this manifest does **NOT** certify:
 - Live deployment to Vercel + Supabase (the build request explicitly puts the live infra on the deployer, not the builder).
@@ -57,14 +57,16 @@ Each gate is split into two columns:
 
 ---
 
-## 2. Combined test report (75/75 green)
+## 2. Combined test report (99/99 green)
 
 | Suite | Total | Pass | Fail | Where |
 |-------|-------|------|------|-------|
 | Stage 2 (engine + PDF + web intake) | 30 | 30 | 0 | `stage-2/deliverables/test-report.txt` |
-| Stage 3 (voice + tow/rental + dashboard) | 27 | 27 | 0 | `stage-3/deliverables/test-report.txt` |
-| Stage 2.5 (HTTP API wrapper) | 18 | 18 | 0 | `stage-2.5/deliverables/test-report.txt` |
-| **Combined** | **75** | **75** | **0** | |
+| Stage 3 (voice + tow/rental + dashboard + T-1 G-PROD-LOCK/G-VER + Tier-1 s7-s15 + T-6 question injection + T-8 parked/not_listed) | 50 | 50 | 0 | `stage-3/deliverables/test-report.txt` |
+| Stage 2.5 (HTTP API wrapper, incl. 2 MFA tests for G-57 + T-25-019 scenario-question) | 19 | 19 | 0 | `stage-2.5/deliverables/test-report.txt` |
+| **Combined** | **99** | **99** | **0** | |
+
+*Historical:* 73/73 was the pre-Stage-2.5 count (2026-06-11); 75/75 was the pre-T1 count (2026-06-13, before G-PROD-LOCK + G-VER closed and added T-1-01..04); 79/79 was the post-MFA-tests count (2026-06-14); 87/87 was the post-T7 count; 90/90 was the post-T6 question-injection count; **99/99 is the current count (2026-06-21)** after T-4-01..11 (G-VER closure for Tier-1 scenarios), T-6-25, T-8-01/02, and T-25-019 (scenario-question endpoint) landed.
 
 Run all three:
 ```bash
@@ -134,7 +136,7 @@ Key pointers:
 | audit_log append-only (G-54) | ✅ (RLS policies in `supabase_store.py`, deployer-evidence) |
 | RLS on intake (G-53) | ✅ (deployer-evidence) |
 | Region = Sydney (G-52) | ✅ (deployer-evidence — region is config at Supabase project creation) |
-| 75/75 green against the deployed API (G-62) | ✅ (T-25-016, deployer-evidence on staging) |
+| 99/99 green against the deployed API (G-62) | ✅ (T-25-016, deployer-evidence on staging; was 79/79 pre-T4/T6/T8, 75/75 pre-MFA, 73/73 pre-Stage-2.5) |
 
 ---
 
@@ -154,7 +156,7 @@ Key pointers:
 ## 8. Verification instructions for the deployer
 
 ```bash
-# 1. Run the 75/75 local test suite
+# 1. Run the 99/99 local test suite
 cd "/Users/finn/Smash repair Engine"
 (cd stage-2   && PYTHONPATH=. python3 tests/run_acceptance.py) | tail -1
 (cd stage-3   && PYTHONPATH=. python3 tests/run_acceptance.py) | tail -1

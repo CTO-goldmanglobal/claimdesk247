@@ -552,6 +552,36 @@ def _drive_regression(client: HTTPClient, case: dict) -> tuple[bool, str]:
     return True, f"stage2: {results['stage2'][0]}/{results['stage2'][1]}, stage3: {results['stage3'][0]}/{results['stage3'][1]}"
 
 
+def _drive_scenario_question_endpoint(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """T6: /api/scenario-question — after the 14 fixed slots, start the
+    scenario-question phase and submit the first answer."""
+    ref = _create_session(client)
+    _accept_consent(client, ref)
+    fixed = {
+        "state_of_accident": "NSW", "datetime_location": "x", "accident_type": "rear-end",
+        "user_vehicle": "x", "other_vehicles": "x", "movement_description": "x",
+        "damage_locations": ["rear"], "control_devices": "none",
+        "police_attendance": "no", "injuries": "none",
+    }
+    _fill_intake(client, ref, fixed)
+    # Start the scenario-question phase (no question_id).
+    code, body, _ = client.request("POST", "/api/scenario-question", json={"reference": ref})
+    if code != 200:
+        return False, f"start status {code}: {body}"
+    nxt = (body or {}).get("next") or {}
+    if nxt.get("slot") != "user_position":
+        return False, f"unexpected first scenario question: {nxt}"
+    # Submit the first answer; expect the second question.
+    code, body, _ = client.request("POST", "/api/scenario-question",
+                                   json={"reference": ref, "question_id": "s1-q1", "value": "front"})
+    if code != 200:
+        return False, f"submit status {code}: {body}"
+    nxt2 = (body or {}).get("next") or {}
+    if nxt2.get("slot") != "user_motion":
+        return False, f"unexpected second scenario question: {nxt2}"
+    return True, "scenario-question endpoint: start -> user_position -> user_motion"
+
+
 DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-001": lambda c, x: _drive_classify_parity(c, x, REAR_END_INTAKE),
     "T-25-002": lambda c, x: _drive_classify_parity(c, x, GIVEWAY_INTAKE),
@@ -571,6 +601,7 @@ DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-016": _drive_regression,
     "T-25-017": _drive_brief_mfa_blocked,
     "T-25-018": _drive_brief_mfa_satisfied,
+    "T-25-019": _drive_scenario_question_endpoint,  # T6
 }
 
 

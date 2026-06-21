@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+
+# Node (for the lovable-ui submodule if any)
+node_modules/
+.npm/
+.yarn/
+.pnp.*
+
+# Vercel
+.vercel/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Local-only handoff symlinks (canonical home is ~/Deepconnet/clients/claimdesk-247/handoff/)
+# Per PROJECT_GUARDRAIL.md §3.3, engagement-level docs belong in the engagement folder.
+# The symlinks below are a local convenience on this machine; do not commit them — they
+# would dangle on any other clone.
+handoff/CURSOR-WORK-LOG.md
+handoff/PAT-ROTATION-RUNBOOK.md
+handoff/SMOKE-TEST-LIVE-2026-06-20.md
+handoff/STATUS-2026-06-21-MONDAY-AM.md
+handoff/WEEKEND-AUDIT-2026-06-20.md
+
+# Local notes
+*.local
+scratch/
