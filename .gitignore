@@ -40,6 +40,16 @@ handoff/SMOKE-TEST-LIVE-2026-06-20.md
 handoff/STATUS-2026-06-21-MONDAY-AM.md
 handoff/WEEKEND-AUDIT-2026-06-20.md
 
+# Local-only engagement-doc symlinks (canonical home is ~/Deepconnet/clients/claimdesk-247/).
+# Per PROJECT_GUARDRAIL.md §3.3, these engagement-level docs were migrated out of the engine
+# repo on 2026-06-22 (CTO Loop Roadmap Phase 0.5); the symlinks are a local convenience so
+# prior doc references still resolve on this machine. Do not commit — would dangle elsewhere.
+/CLAIMDESK247-EXECUTIVE-SUMMARY.md
+/CLAIMDESK247-LOOP-ROADMAP.md
+/CLAIMDESK247-SHOWCASE-AND-REVIEW.md
+/LOOP-GATE-COMPLETENESS-REVIEW.md
+/LOOP-OPERATING-RULES.md
+
 # Local notes
 *.local
 scratch/
