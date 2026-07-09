@@ -1,0 +1,4 @@
+[submodule "lovable-ui"]
+	path = lovable-ui
+	url = https://github.com/CTO-goldmanglobal/claimdesk247-76a0b7de.git
+	branch = main
