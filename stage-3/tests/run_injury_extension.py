@@ -1,0 +1,576 @@
+#!/usr/bin/env python3
+"""Personal-Injury Extension acceptance tests.
+
+Spec: claimdesk-injury-extension-INSTRUCTIONS-2026-07-03.md
+Extends the 99/99 motor discipline with four test families:
+
+  (a) Per-scenario unsigned → escalation for both new trees (PL pl1-pl6,
+      med-neg mn1-mn7). Every new scenario ships with an empty legal_signoff,
+      so the engine MUST escalate (unsigned-scenario) until Legal Head signs.
+  (b) Med-neg escalation-dominance: NO med-neg substantive scenario emits a
+      likely/possible band in v1, even if signed. s5O standard-of-care is
+      expert-evidence territory.
+  (c) Hash-isolation: mutating the PL tree does NOT stale the motor sign-off,
+      and PL scenarios go stale-signoff when their tree changes.
+  (d) Per-tree hashing + registry: three independent trees load with distinct
+      hashes; /healthz reports the rule_tree_versions map.
+
+This suite is invoked by run_acceptance.py::main() after the Stage-3 motor
+suite. Exit 0 iff all green.
+"""
+from __future__ import annotations
+
+import copy
+import sys
+from pathlib import Path
+from typing import Any, Callable
+
+# Make the engine importable when run standalone.
+STAGE3_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(STAGE3_DIR))
+
+from app import engine as _eng
+from app.engine import (
+    DEFAULT_CLAIM_TYPE, LIMITATION_BUFFER_YEARS, MEDNEG_TREATMENT_TYPE_TO_SCENARIO,
+    PD_COLLISION_TYPE_TO_SCENARIO, PL_HAZARD_TYPE_TO_SCENARIO, RULE_TREE_REGISTRY, classify,
+    _claim_type_for_scenario_id, _compute_scenarios_hash, _load_rule_tree,
+    _load_rule_tree_for,
+)
+
+
+REPORT_PATH = STAGE3_DIR / "deliverables" / "injury-extension-test-report.txt"
+
+
+# -----------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------
+
+def _base_intake(claim_type: str) -> dict[str, Any]:
+    """A minimal NSW intake for the given claim_type with no escalation
+    signals (no injury, recent date, no govt defendant, etc.) so the only
+    thing left is the sign-off gate."""
+    base = {"state": "NSW", "claim_type": claim_type, "injuries": "none",
+            "harm_severity": "none", "incident_date": "2026-06-01"}
+    return base
+
+
+def _signed_tree(claim_type: str) -> dict[str, Any]:
+    """Return a deep copy of the claim_type's tree with EVERY scenario signed
+    against the current content hash. Used to test what the engine would do
+    once Legal Head has signed the tree."""
+    tree = copy.deepcopy(_load_rule_tree_for(claim_type))
+    h = _compute_scenarios_hash(tree)
+    for s in tree["scenarios"]:
+        s["legal_signoff"] = {"approved": True, "version": h,
+                              "by": "Legal Head (test)", "date": "2026-07-04"}
+    return tree
+
+
+def _classify_with_tree(intake: dict[str, Any], fake_tree: dict[str, Any]) -> Any:
+    """Run classify() with a specific tree patched in for the resolved
+    claim_type. Restores the real loader afterwards."""
+    import app.engine as engmod
+    ct = intake.get("claim_type", DEFAULT_CLAIM_TYPE)
+    if ct == "motor":
+        real = engmod._load_rule_tree
+        real.cache_clear()
+        engmod._load_rule_tree = lambda: fake_tree  # type: ignore[assignment]
+        try:
+            return classify(intake)
+        finally:
+            engmod._load_rule_tree = real  # type: ignore[assignment]
+            real.cache_clear()
+    real_typed = engmod._load_rule_tree_typed
+    real_typed.cache_clear()
+    engmod._load_rule_tree_typed = lambda _ct: fake_tree  # type: ignore[assignment]
+    try:
+        return classify(intake)
+    finally:
+        engmod._load_rule_tree_typed = real_typed  # type: ignore[assignment]
+        real_typed.cache_clear()
+
+
+def _unsigned_tree(claim_type: str) -> dict[str, Any]:
+    """A deep copy of the claim_type's tree with EVERY sign-off stripped
+    (approved=False, empty version). Used to exercise the G-PROD-LOCK gate
+    mechanism regardless of the live sign-off state — once Legal Head has
+    signed the live trees, this patched copy is what proves the gate still
+    rejects unsigned content."""
+    tree = copy.deepcopy(_load_rule_tree_for(claim_type))
+    for s in tree["scenarios"]:
+        s["legal_signoff"] = {"approved": False, "version": "", "by": "", "date": ""}
+    return tree
+
+
+# -----------------------------------------------------------------------
+# Family (a): per-scenario unsigned → escalation
+# -----------------------------------------------------------------------
+
+def _test_pl_all_unsigned_escalate() -> tuple[bool, str]:
+    """Every PL scenario pl1-pl6 escalates as unsigned-scenario when the PL
+    tree is unsigned. Once the live tree is signed (Legal Head 2026-07-05),
+    this is proven by patching in an unsigned copy — the gate mechanism, not
+    the live sign-off state, is what's under test."""
+    tree = _unsigned_tree("public_liability")
+    results = []
+    for hazard, sid in PL_HAZARD_TYPE_TO_SCENARIO.items():
+        intake = _base_intake("public_liability")
+        intake["hazard_type"] = hazard
+        er = _classify_with_tree(intake, tree)
+        if er.escalation != "unsigned-scenario":
+            results.append(f"{sid}: expected unsigned-scenario, got {er.escalation!r}")
+    if results:
+        return False, "; ".join(results)
+    return True, f"all {len(PL_HAZARD_TYPE_TO_SCENARIO)} PL hazard types → unsigned-scenario (via patched unsigned tree)"
+
+
+def _test_medneg_all_unsigned_escalate() -> tuple[bool, str]:
+    """Every med-neg scenario mn1-mn7 escalates as unsigned-scenario when the
+    med-neg tree is unsigned. Once the live tree is signed (Legal Head
+    2026-07-05), this is proven by patching in an unsigned copy — the gate
+    mechanism, not the live sign-off state, is what's under test."""
+    tree = _unsigned_tree("medical_negligence")
+    results = []
+    for treat, sid in MEDNEG_TREATMENT_TYPE_TO_SCENARIO.items():
+        intake = _base_intake("medical_negligence")
+        intake["treatment_type"] = treat
+        er = _classify_with_tree(intake, tree)
+        if er.escalation != "unsigned-scenario":
+            results.append(f"{sid}: expected unsigned-scenario, got {er.escalation!r}")
+    if results:
+        return False, "; ".join(results)
+    return True, f"all {len(MEDNEG_TREATMENT_TYPE_TO_SCENARIO)} med-neg treatment types → unsigned-scenario (via patched unsigned tree)"
+
+
+# -----------------------------------------------------------------------
+# Family (b): med-neg escalation-dominance (no likely/possible even if signed)
+# -----------------------------------------------------------------------
+
+def _test_medneg_never_bands_likely_or_possible() -> tuple[bool, str]:
+    """Even if the med-neg tree were fully signed, NO substantive med-neg
+    scenario emits a likely/possible band. s5O standard-of-care is expert
+    evidence — the engine must never auto-band it."""
+    tree = _signed_tree("medical_negligence")
+    violations = []
+    for treat, sid in MEDNEG_TREATMENT_TYPE_TO_SCENARIO.items():
+        intake = _base_intake("medical_negligence")
+        intake["treatment_type"] = treat
+        # Give it a plausible harm so it's not the no-harm filter path.
+        intake["harm_severity"] = "serious"
+        intake["injuries"] = "serious"
+        er = _classify_with_tree(intake, tree)
+        # esc-injury fires first (serious), which is correct escalation dominance.
+        # The assertion is: the engine NEVER returns band in (likely, possible)
+        # for a med-neg scenario, regardless of path.
+        if er.band in ("likely", "possible"):
+            violations.append(f"{sid}: emitted band={er.band} (forbidden for med-neg)")
+    if violations:
+        return False, "; ".join(violations)
+    return True, "no med-neg scenario emits likely/possible (escalation-dominant)"
+
+
+def _test_medneg_no_harm_filter() -> tuple[bool, str]:
+    """Hard filter: no harm at all → unclear band (no compensable damage),
+    still human-reviewed. This is the ONE deterministic med-neg resolution."""
+    tree = _signed_tree("medical_negligence")
+    intake = _base_intake("medical_negligence")
+    intake["treatment_type"] = "surgical_outcome"
+    intake["harm_severity"] = "none"
+    intake["injuries"] = "none"
+    er = _classify_with_tree(intake, tree)
+    # With no harm and a signed tree, the engine resolves to unclear (the
+    # med-neg band helper returns "unclear" for all mn scenarios).
+    if er.band == "unclear":
+        return True, "no-harm med-neg → unclear (hard filter, human-reviewed)"
+    if er.escalation:
+        return True, f"no-harm med-neg → escalated ({er.escalation}) — still human-reviewed"
+    return False, f"no-harm med-neg produced band={er.band!r} escalation={er.escalation!r}"
+
+
+# -----------------------------------------------------------------------
+# Family (c): hash-isolation between trees
+# -----------------------------------------------------------------------
+
+def _test_hash_isolation_pl_change_does_not_stale_motor() -> tuple[bool, str]:
+    """Mutating the PL tree must NOT change the motor tree's hash or sign-off
+    state. This is the whole point of per-tree hashing (spec §1.2)."""
+    motor_tree = _load_rule_tree_for("motor")
+    motor_hash_before = _compute_scenarios_hash(motor_tree)
+
+    # Build a mutated PL tree (add a cosmetic field to a scenario).
+    pl_tree = copy.deepcopy(_load_rule_tree_for("public_liability"))
+    pl_tree["scenarios"][0]["_test_mutation"] = "cosmetic-change"
+    pl_hash_mutated = _compute_scenarios_hash(pl_tree)
+    pl_hash_original = _compute_scenarios_hash(_load_rule_tree_for("public_liability"))
+
+    # Reload motor (uncached) and re-hash.
+    motor_hash_after = _compute_scenarios_hash(_load_rule_tree_for("motor"))
+
+    if motor_hash_before != motor_hash_after:
+        return False, "motor hash changed across PL mutation (isolation broken)"
+    if pl_hash_mutated == pl_hash_original:
+        return False, "PL hash did NOT change after mutation (hash not content-bound)"
+    return True, (f"motor hash stable ({motor_hash_before[:8]}) across PL mutation; "
+                  f"PL hash changed ({pl_hash_original[:8]} → {pl_hash_mutated[:8]})")
+
+
+def _test_pl_stale_signoff_after_mutation() -> tuple[bool, str]:
+    """A PL scenario signed against the original tree goes stale-signoff when
+    the PL tree's content changes. Motor sign-off is untouched."""
+    pl_original = _load_rule_tree_for("public_liability")
+    h_original = _compute_scenarios_hash(pl_original)
+
+    # Sign pl1 against the original hash.
+    pl_signed = copy.deepcopy(pl_original)
+    for s in pl_signed["scenarios"]:
+        if s["id"] == "pl1-slip-wet-surface":
+            s["legal_signoff"] = {"approved": True, "version": h_original,
+                                  "by": "Legal Head (test)", "date": "2026-07-04"}
+
+    # Mutate the PL tree (change a scenario's body).
+    pl_mutated = copy.deepcopy(pl_signed)
+    pl_mutated["scenarios"][0]["name"] = "Slip on a wet surface (MUTATED)"
+
+    intake = _base_intake("public_liability")
+    intake["hazard_type"] = "wet_surface"
+    er = _classify_with_tree(intake, pl_mutated)
+    if er.escalation != "stale-signoff":
+        return False, f"expected stale-signoff after PL mutation, got {er.escalation!r}"
+    return True, "PL scenario signed-then-mutated → stale-signoff (sign-off bound to content)"
+
+
+# -----------------------------------------------------------------------
+# Family (d): registry + per-tree hashing
+# -----------------------------------------------------------------------
+
+def _test_registry_three_distinct_trees() -> tuple[bool, str]:
+    """The registry loads three trees with distinct hashes."""
+    hashes = {}
+    for ct in ("motor", "public_liability", "medical_negligence"):
+        tree = _load_rule_tree_for(ct)
+        hashes[ct] = _compute_scenarios_hash(tree)
+    if len(set(hashes.values())) != 3:
+        return False, f"hashes not distinct: {hashes}"
+    return True, f"3 trees, 3 distinct hashes: {[h[:8] for h in hashes.values()]}"
+
+
+def _test_claim_type_routing() -> tuple[bool, str]:
+    """Scenario id prefixes route to the correct claim_type."""
+    checks = {
+        "s1-rear-end": "motor",
+        "s11-parked-vehicle": "motor",
+        "pl1-slip-wet-surface": "public_liability",
+        "pl6-other-public-place": "public_liability",
+        "mn1-surgical-outcome": "medical_negligence",
+        "mn4-birth-injury": "medical_negligence",
+    }
+    bad = [(sid, want, _claim_type_for_scenario_id(sid))
+           for sid, want in checks.items()
+           if _claim_type_for_scenario_id(sid) != want]
+    if bad:
+        return False, f"routing mismatches: {bad}"
+    return True, f"all {len(checks)} scenario-id → claim_type routes correct"
+
+
+def _test_new_escalation_triggers() -> tuple[bool, str]:
+    """The 4 new injury-extension triggers fire for their gating conditions."""
+    results = []
+    # esc-serious-injury (all claim types)
+    er = classify({**_base_intake("public_liability"), "hazard_type": "wet_surface",
+                   "harm_severity": "death"})
+    if er.escalation != "esc-serious-injury":
+        results.append(f"serious-injury/death: got {er.escalation!r}")
+    # esc-workers-comp (PL)
+    er = classify({**_base_intake("public_liability"), "hazard_type": "wet_surface",
+                   "at_work": "yes"})
+    if er.escalation != "esc-workers-comp":
+        results.append(f"workers-comp: got {er.escalation!r}")
+    # esc-govt-defendant (PL)
+    er = classify({**_base_intake("public_liability"), "hazard_type": "wet_surface",
+                   "defendant_type": "council"})
+    if er.escalation != "esc-govt-defendant":
+        results.append(f"govt-defendant: got {er.escalation!r}")
+    # esc-limitation (PL, old date)
+    er = classify({**_base_intake("public_liability"), "hazard_type": "wet_surface",
+                   "incident_date": "2020-01-01"})
+    if er.escalation != "esc-limitation":
+        results.append(f"limitation: got {er.escalation!r}")
+    if results:
+        return False, "; ".join(results)
+    return True, "all 4 new triggers (serious-injury, workers-comp, govt-defendant, limitation) fire"
+
+
+def _test_motor_backward_compat_no_claim_type() -> tuple[bool, str]:
+    """A motor intake with NO claim_type still resolves to s1-rear-end and
+    behaves as before the extension (backward compat with all motor tests).
+
+    Pre-2026-07-05 this asserted unsigned-scenario. Post Legal Head sign-off
+    (2026-07-05) the motor tree is live, so the same intake now returns
+    band='likely' for a clear rear-end. The backward-compat guarantee under
+    test is ROUTING (s1-rear-end) and that the extension didn't change motor
+    behavior — the sign-off state is orthogonal to that."""
+    er = classify({"state": "NSW", "accident_type": "rear-end", "injuries": "none"})
+    if er.scenario_id != "s1-rear-end":
+        return False, f"expected s1-rear-end, got {er.scenario_id!r}"
+    # With the motor tree now signed, a clear rear-end bands as 'likely'.
+    # (If the motor tree were unsigned, er.escalation would be 'unsigned-scenario'
+    # — both states confirm routing succeeded; only the gate differs.)
+    if er.escalation == "unsigned-scenario":
+        return True, "motor intake without claim_type → s1-rear-end, unsigned-scenario (tree not yet signed)"
+    if er.band != "likely":
+        return False, f"motor rear-end (signed) expected band='likely', got band={er.band!r} escalation={er.escalation!r}"
+    return True, "motor intake without claim_type → s1-rear-end, band='likely' (tree signed 2026-07-05)"
+
+
+# -----------------------------------------------------------------------
+# Family (e): Property Damage (Lane 1 beachhead, spec 2026-07-05)
+# THIRD-PARTY-MOTOR-CLAIM-FOCUS / HOW-TO-WIN-3P-MOTOR. PD ships unsigned like
+# the other trees, but unlike med-neg it IS deterministically bandable once
+# signed (rear-end/give-way/reversing have settled liability patterns). The
+# injury firewall is the red line: any injury → esc-injury → PI pathway,
+# never a PD band, never monetized per-referral.
+# -----------------------------------------------------------------------
+
+def _test_pd_all_unsigned_escalate() -> tuple[bool, str]:
+    """Every PD scenario pd1-pd7 escalates as unsigned-scenario when the PD
+    tree is unsigned. Once the live tree is signed (Legal Head 2026-07-05),
+    this is proven by patching in an unsigned copy — the gate mechanism, not
+    the live sign-off state, is what's under test."""
+    tree = _unsigned_tree("property_damage")
+    results = []
+    seen_scenarios = set()
+    for col, sid in PD_COLLISION_TYPE_TO_SCENARIO.items():
+        seen_scenarios.add(sid)
+        intake = _base_intake("property_damage")
+        intake["collision_type"] = col
+        er = _classify_with_tree(intake, tree)
+        if er.escalation != "unsigned-scenario":
+            results.append(f"{sid} (collision={col}): expected unsigned-scenario, got {er.escalation!r}")
+    if results:
+        return False, "; ".join(results)
+    return True, (f"all {len(seen_scenarios)} PD scenarios → unsigned-scenario "
+                 f"(across {len(PD_COLLISION_TYPE_TO_SCENARIO)} collision-type aliases, via patched unsigned tree)")
+
+
+def _test_pd_injury_firewall() -> tuple[bool, str]:
+    """Injury firewall: ANY injury mention in a PD intake routes to esc-injury,
+    never to a PD band. This is the red line that keeps Lane 1 (property) clean
+    of Lane 2 (CTP injury / claim-farming) exposure. Hard test across all
+    collision types AND both injury severities."""
+    violations = []
+    for col in ("rear-end", "give_way", "reversing", "parked_hit", "car_park"):
+        for inj in ("minor", "serious"):
+            intake = _base_intake("property_damage")
+            intake["collision_type"] = col
+            intake["injuries"] = inj
+            er = classify(intake)
+            if er.escalation != "esc-injury":
+                violations.append(f"{col}+injuries={inj}: expected esc-injury, got "
+                                  f"escalation={er.escalation!r} band={er.band!r}")
+            if er.band is not None:
+                violations.append(f"{col}+injuries={inj}: emitted band={er.band!r} (forbidden — injury must firewall)")
+    if violations:
+        return False, "; ".join(violations)
+    return True, "all PD collision types × {minor,serious} → esc-injury, no band (firewall holds)"
+
+
+def _test_pd_uninsured_driver_trigger() -> tuple[bool, str]:
+    """The PD-specific esc-uninsured-driver trigger fires when the at-fault
+    driver is uninsured or cover is unknown — recovery shifts to the user's
+    own insurer, which is a different matter path."""
+    for val in ("yes", "unsure"):
+        intake = _base_intake("property_damage")
+        intake["collision_type"] = "rear-end"
+        intake["at_fault_uninsured"] = val
+        er = classify(intake)
+        if er.escalation != "esc-uninsured-driver":
+            return False, f"at_fault_uninsured={val!r}: expected esc-uninsured-driver, got {er.escalation!r}"
+    # 'no' must NOT trigger it (driver is insured — normal recovery path)
+    intake_ok = _base_intake("property_damage")
+    intake_ok["collision_type"] = "rear-end"
+    intake_ok["at_fault_uninsured"] = "no"
+    er_ok = classify(intake_ok)
+    if er_ok.escalation == "esc-uninsured-driver":
+        return False, "at_fault_uninsured='no' wrongly triggered esc-uninsured-driver"
+    return True, "esc-uninsured-driver fires for yes/unsure, not for 'no'"
+
+
+def _test_pd_hash_isolation_from_motor_and_others() -> tuple[bool, str]:
+    """Mutating the PD tree must NOT change motor, PL, or med-neg hashes.
+    Extends IX-05's isolation property to the 4-tree registry."""
+    hashes_before = {ct: _compute_scenarios_hash(_load_rule_tree_for(ct))
+                     for ct in ("motor", "property_damage", "public_liability", "medical_negligence")}
+
+    pd_mutated = copy.deepcopy(_load_rule_tree_for("property_damage"))
+    pd_mutated["scenarios"][0]["_test_mutation"] = "cosmetic-change"
+    pd_hash_after = _compute_scenarios_hash(pd_mutated)
+
+    hashes_after = {ct: _compute_scenarios_hash(_load_rule_tree_for(ct))
+                    for ct in ("motor", "property_damage", "public_liability", "medical_negligence")}
+
+    if pd_hash_after == hashes_before["property_damage"]:
+        return False, "PD hash did NOT change after mutation (hash not content-bound)"
+    for ct in ("motor", "public_liability", "medical_negligence"):
+        if hashes_before[ct] != hashes_after[ct]:
+            return False, f"{ct} hash changed across PD mutation (isolation broken)"
+    return True, (f"PD hash changed ({hashes_before['property_damage'][:8]} → {pd_hash_after[:8]}); "
+                  f"motor/PL/med-neg hashes stable")
+
+
+def _test_pd_signed_bands_deterministically() -> tuple[bool, str]:
+    """UNLIKE med-neg (IX-03), PD IS deterministically bandable once signed —
+    that's the whole point of the Lane 1 beachhead (settled liability patterns).
+    With a fully-signed PD tree, a clear rear-end (user in front, stopped) must
+    return band='likely', and the catch-all pd7-other must cap at 'unclear'."""
+    tree = _signed_tree("property_damage")
+    violations = []
+
+    # Clear liability: user in front, stopped, 2-car rear-end → likely
+    intake_clear = _base_intake("property_damage")
+    intake_clear["collision_type"] = "rear-end"
+    intake_clear["user_position"] = "front"
+    intake_clear["user_motion"] = "stopped"
+    intake_clear["chain_count"] = 2
+    er_clear = _classify_with_tree(intake_clear, tree)
+    if er_clear.band != "likely":
+        violations.append(f"clear rear-end: expected likely, got band={er_clear.band!r}")
+
+    # User was the following driver → possible (not the recovery side)
+    intake_behind = _base_intake("property_damage")
+    intake_behind["collision_type"] = "rear-end"
+    intake_behind["user_position"] = "behind"
+    intake_behind["user_motion"] = "moving"
+    intake_behind["chain_count"] = 2
+    er_behind = _classify_with_tree(intake_behind, tree)
+    if er_behind.band != "possible":
+        violations.append(f"following driver: expected possible, got band={er_behind.band!r}")
+
+    # Catch-all pd7-other must cap at unclear (never likely/possible)
+    intake_other = _base_intake("property_damage")
+    intake_other["collision_type"] = "other"
+    er_other = _classify_with_tree(intake_other, tree)
+    if er_other.band not in ("unclear", None) or er_other.band == "likely":
+        violations.append(f"pd7-other: expected unclear, got band={er_other.band!r}")
+
+    if violations:
+        return False, "; ".join(violations)
+    return True, "signed PD bands deterministically: clear=likely, following=possible, other=unclear"
+
+
+def _test_pd_routing_and_registry_four_trees() -> tuple[bool, str]:
+    """PD scenario ids route to property_damage; the registry now has 4 trees
+    with distinct hashes. Updates IX-07/IX-08 for the 4-tree world."""
+    # Routing
+    route_checks = {
+        "pd1-rear-end": "property_damage",
+        "pd7-other": "property_damage",
+        "s1-rear-end": "motor",
+        "pl1-slip-wet-surface": "public_liability",
+        "mn1-surgical-outcome": "medical_negligence",
+    }
+    bad_routes = [(sid, want, _claim_type_for_scenario_id(sid))
+                  for sid, want in route_checks.items()
+                  if _claim_type_for_scenario_id(sid) != want]
+    if bad_routes:
+        return False, f"routing mismatches: {bad_routes}"
+
+    # Registry: 4 distinct trees
+    if len(RULE_TREE_REGISTRY) != 4:
+        return False, f"registry has {len(RULE_TREE_REGISTRY)} trees, expected 4"
+    hashes = {ct: _compute_scenarios_hash(_load_rule_tree_for(ct))
+              for ct in ("motor", "property_damage", "public_liability", "medical_negligence")}
+    if len(set(hashes.values())) != 4:
+        return False, f"4 trees but hashes not distinct: {[h[:8] for h in hashes.values()]}"
+    return True, ("4 trees registered, 4 distinct hashes, PD routing correct "
+                  f"(hashes: {[h[:8] for h in hashes.values()]})")
+
+
+def _test_pd_backward_compat_motor_unchanged() -> tuple[bool, str]:
+    """Adding the PD tree did not change motor behavior. The motor suite is
+    unaffected — same scenario resolution. Post Legal Head sign-off
+    (2026-07-05) motor now bands (was unsigned); the backward-compat guarantee
+    under test is ROUTING (s1/s5), not the sign-off state."""
+    er = classify({"state": "NSW", "claim_type": "motor",
+                   "accident_type": "rear-end", "injuries": "none"})
+    if er.scenario_id != "s1-rear-end":
+        return False, f"motor rear-end now routes to {er.scenario_id!r} (should be s1-rear-end)"
+    # Motor is now signed: clear rear-end bands as 'likely'.
+    if er.escalation == "unsigned-scenario":
+        pass  # tree not yet signed — still valid backward compat
+    elif er.band != "likely":
+        return False, f"motor rear-end (signed) expected band='likely', got band={er.band!r} escalation={er.escalation!r}"
+    # And the legacy no-claim_type path still works
+    er2 = classify({"state": "NSW", "accident_type": "reversing", "injuries": "none"})
+    if er2.scenario_id != "s5-reversing":
+        return False, f"legacy motor reversing now routes to {er2.scenario_id!r}"
+    state = "band='likely' (signed)" if er.band == "likely" else "unsigned-scenario"
+    return True, f"motor behavior unchanged by PD addition (s1→{state}, s5 resolves as before)"
+
+
+# -----------------------------------------------------------------------
+# Runner
+# -----------------------------------------------------------------------
+
+CASES: list[tuple[str, Callable[[], tuple[bool, str]]]] = [
+    ("IX-01", _test_pl_all_unsigned_escalate),
+    ("IX-02", _test_medneg_all_unsigned_escalate),
+    ("IX-03", _test_medneg_never_bands_likely_or_possible),
+    ("IX-04", _test_medneg_no_harm_filter),
+    ("IX-05", _test_hash_isolation_pl_change_does_not_stale_motor),
+    ("IX-06", _test_pl_stale_signoff_after_mutation),
+    ("IX-07", _test_registry_three_distinct_trees),
+    ("IX-08", _test_claim_type_routing),
+    ("IX-09", _test_new_escalation_triggers),
+    ("IX-10", _test_motor_backward_compat_no_claim_type),
+    # Property Damage (Lane 1 beachhead) — spec 2026-07-05
+    ("IX-11", _test_pd_all_unsigned_escalate),
+    ("IX-12", _test_pd_injury_firewall),
+    ("IX-13", _test_pd_uninsured_driver_trigger),
+    ("IX-14", _test_pd_hash_isolation_from_motor_and_others),
+    ("IX-15", _test_pd_signed_bands_deterministically),
+    ("IX-16", _test_pd_routing_and_registry_four_trees),
+    ("IX-17", _test_pd_backward_compat_motor_unchanged),
+]
+
+
+def run_all() -> tuple[int, int, int, list[dict]]:
+    results: list[dict] = []
+    passes = 0
+    fails = 0
+    for cid, fn in CASES:
+        try:
+            ok, detail = fn()
+        except Exception as exc:  # pragma: no cover
+            ok = False
+            detail = f"EXC: {type(exc).__name__}: {exc}"
+        results.append({"id": cid, "pass": ok, "detail": detail})
+        if ok:
+            passes += 1
+        else:
+            fails += 1
+    return len(CASES), passes, fails, results
+
+
+def write_report(total: int, passes: int, fails: int, results: list[dict]) -> None:
+    REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["PERSONAL-INJURY EXTENSION TEST REPORT",
+             f"Generated: {__import__('datetime').datetime.utcnow().isoformat()}Z",
+             "Spec: claimdesk-injury-extension-INSTRUCTIONS-2026-07-03.md", ""]
+    lines.append("=" * 80)
+    for r in results:
+        flag = "PASS" if r["pass"] else "FAIL"
+        lines.append(f"[{flag}] {r['id']:6s}  {r['detail']}")
+    lines.append("=" * 80)
+    lines.append(f"TOTAL: {total}  PASS: {passes}  FAIL: {fails}")
+    REPORT_PATH.write_text("\n".join(lines) + "\n")
+
+
+def main() -> int:
+    total, passes, fails, results = run_all()
+    write_report(total, passes, fails, results)
+    print(f"[injury-extension] TOTAL: {total}  PASS: {passes}  FAIL: {fails}")
+    return 0 if fails == 0 else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

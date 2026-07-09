@@ -1,0 +1,24 @@
+PERSONAL-INJURY EXTENSION TEST REPORT
+Generated: 2026-07-04T20:22:27.212450Z
+Spec: claimdesk-injury-extension-INSTRUCTIONS-2026-07-03.md
+
+================================================================================
+[PASS] IX-01   all 17 PL hazard types → unsigned-scenario (via patched unsigned tree)
+[PASS] IX-02   all 8 med-neg treatment types → unsigned-scenario (via patched unsigned tree)
+[PASS] IX-03   no med-neg scenario emits likely/possible (escalation-dominant)
+[PASS] IX-04   no-harm med-neg → unclear (hard filter, human-reviewed)
+[PASS] IX-05   motor hash stable (3964e668) across PL mutation; PL hash changed (dc824c35 → bd575523)
+[PASS] IX-06   PL scenario signed-then-mutated → stale-signoff (sign-off bound to content)
+[PASS] IX-07   3 trees, 3 distinct hashes: ['3964e668', 'dc824c35', '4e3fe60a']
+[PASS] IX-08   all 6 scenario-id → claim_type routes correct
+[PASS] IX-09   all 4 new triggers (serious-injury, workers-comp, govt-defendant, limitation) fire
+[PASS] IX-10   motor intake without claim_type → s1-rear-end, band='likely' (tree signed 2026-07-05)
+[PASS] IX-11   all 7 PD scenarios → unsigned-scenario (across 10 collision-type aliases, via patched unsigned tree)
+[PASS] IX-12   all PD collision types × {minor,serious} → esc-injury, no band (firewall holds)
+[PASS] IX-13   esc-uninsured-driver fires for yes/unsure, not for 'no'
+[PASS] IX-14   PD hash changed (1f13feba → 72c88661); motor/PL/med-neg hashes stable
+[PASS] IX-15   signed PD bands deterministically: clear=likely, following=possible, other=unclear
+[PASS] IX-16   4 trees registered, 4 distinct hashes, PD routing correct (hashes: ['3964e668', '1f13feba', 'dc824c35', '4e3fe60a'])
+[PASS] IX-17   motor behavior unchanged by PD addition (s1→band='likely' (signed), s5 resolves as before)
+================================================================================
+TOTAL: 17  PASS: 17  FAIL: 0

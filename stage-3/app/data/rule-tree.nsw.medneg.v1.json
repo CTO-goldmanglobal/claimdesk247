@@ -1,0 +1,817 @@
+{
+  "$comment": "ClaimDesk 247 — Medical Negligence sub-tree (v1). Personal-injury extension per spec 2026-07-03 Part 3. DESIGN POSTURE: escalation-dominant. Medical-negligence liability turns on breach of the standard of care judged by peer professional opinion (NSW Civil Liability Act s5O) plus causation (s5D). You CANNOT deterministically band a standard-of-care breach from a questionnaire — it requires expert medical evidence. So this sub-tree is structured intake + near-universal escalation. Only hard filters resolve without a human (no harm -> unlikely-equivalent; outside limitation -> esc-limitation; not NSW -> state-scope; pure communication complaint -> HCCC pathway). Every substantive scenario escalates with escalation='medneg-requires-assessment'. A hard test asserts NO med-neg scenario emits likely/possible. Every rule below is a DRAFT for Legal Head sign-off under CD-E4/CD-G2. Per-tree hashing: this tree's sign-off is bound to its own scenarios[] hash.",
+  "version": "1.0.0",
+  "jurisdiction": "NSW",
+  "claim_type": "medical_negligence",
+  "governing_law": "Civil Liability Act 2002 (NSW), esp. s5O (peer professional opinion) and s5D (causation)",
+  "spec_change": "v1.0.0 — Initial med-neg sub-tree. Scenarios mn1-mn7, ALL escalation-dominant. Scenarios exist to structure the case file for the lawyer, NOT to emit a band.",
+  "builder": "Cursor (Personal-Injury Extension, spec 2026-07-03)",
+  "build_date": "2026-07-04",
+  "global_escalation_triggers": [
+    {
+      "id": "esc-injury",
+      "condition": "near-always fires — injury IS the claim",
+      "applicability": "medical_negligence"
+    },
+    {
+      "id": "esc-vulnerable",
+      "condition": "vulnerable claimant",
+      "applicability": "medical_negligence"
+    },
+    {
+      "id": "esc-fraud",
+      "condition": "story inconsistency",
+      "applicability": "medical_negligence"
+    },
+    {
+      "id": "esc-dispute",
+      "condition": "customer disputes summary",
+      "applicability": "medical_negligence"
+    },
+    {
+      "id": "esc-multiparty",
+      "condition": "multiple providers/facilities",
+      "applicability": "medical_negligence"
+    },
+    {
+      "id": "esc-advice",
+      "condition": "'do I have a case?' = asking for advice",
+      "applicability": "medical_negligence"
+    },
+    {
+      "id": "esc-serious-injury",
+      "condition": "death, permanent impairment, birth injury",
+      "applicability": "medical_negligence"
+    },
+    {
+      "id": "esc-workers-comp",
+      "condition": "treatment in the course of employment",
+      "applicability": "medical_negligence"
+    },
+    {
+      "id": "esc-govt-defendant",
+      "condition": "public hospital / public provider",
+      "applicability": "medical_negligence"
+    },
+    {
+      "id": "esc-limitation",
+      "condition": "incident date > ~2.5 yrs ago",
+      "applicability": "medical_negligence"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "mn1-surgical-outcome",
+      "name": "Surgical outcome",
+      "status": "ESCALATION_ONLY",
+      "rule_citations": [
+        {
+          "rule": "CLA s5O",
+          "title": "Peer professional opinion — standard of care"
+        },
+        {
+          "rule": "CLA s5D",
+          "title": "Causation"
+        }
+      ],
+      "classification_questions": [
+        {
+          "id": "mn1-q1",
+          "slot": "provider_type",
+          "question_web": "Who provided the treatment?",
+          "answer_type": "enum",
+          "options": [
+            "gp",
+            "hospital",
+            "specialist",
+            "surgeon",
+            "dentist",
+            "cosmetic",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn1-q2",
+          "slot": "provider_public_private",
+          "question_web": "Was the provider public or private?",
+          "answer_type": "enum",
+          "options": [
+            "public",
+            "private",
+            "unsure"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn1-q3",
+          "slot": "incident_date",
+          "question_web": "When did it happen?",
+          "answer_type": "text",
+          "validation": "date",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn1-q4",
+          "slot": "harm_severity",
+          "question_web": "What harm did you suffer?",
+          "answer_type": "enum",
+          "options": [
+            "none",
+            "minor",
+            "serious",
+            "permanent_impairment",
+            "death"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn1-q5",
+          "slot": "outcome_nature",
+          "question_web": "Was it an unexpected outcome or what you believe was an error?",
+          "answer_type": "enum",
+          "options": [
+            "unexpected_outcome",
+            "suspected_error",
+            "not_sure"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn1-q6",
+          "slot": "second_opinion",
+          "question_web": "Have you had a second medical opinion?",
+          "answer_type": "enum",
+          "options": [
+            "yes",
+            "no",
+            "not_yet"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        }
+      ],
+      "default_pattern": {
+        "description": "Escalation-dominant — requires expert assessment of standard of care",
+        "favours": "escalation"
+      },
+      "exceptions": [],
+      "damage_consistency_check": {
+        "expected": "n/a",
+        "on_mismatch": "n/a"
+      },
+      "band_logic": [
+        {
+          "when": "harm_severity = none",
+          "band": "unclear",
+          "note": "no compensable damage — still human-reviewed"
+        },
+        {
+          "when": "otherwise",
+          "band": "unclear",
+          "note": "escalation-dominant: medneg-requires-assessment"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "unclear",
+          "text_web": "Medical-negligence claims in NSW turn on whether the care fell below the standard expected of the profession (Civil Liability Act s5O) and whether that caused your harm (s5D) — and that requires expert medical evidence your description alone can't establish. We'll have a lawyer review what you've told us and follow up. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": [
+        {
+          "condition": "harm_severity in (death, permanent_impairment)",
+          "action": "route_to_esc-serious-injury"
+        },
+        {
+          "condition": "provider_public_private = public",
+          "action": "route_to_esc-govt-defendant"
+        },
+        {
+          "condition": "always",
+          "action": "medneg-requires-assessment"
+        }
+      ],
+      "legal_signoff": {
+        "approved": true,
+        "version": "4e3fe60ac4c277b3635636f43d7d7c4929d6dc7449bcb884ff2d4fb178807185",
+        "by": "Legal Head — Goldman Global, provisional approval pending final UX-level sign-off (2026-07-05)",
+        "date": "2026-07-05"
+      }
+    },
+    {
+      "id": "mn2-misdiagnosis-delay",
+      "name": "Misdiagnosis or delayed diagnosis",
+      "status": "ESCALATION_ONLY",
+      "rule_citations": [
+        {
+          "rule": "CLA s5O",
+          "title": "Peer professional opinion"
+        },
+        {
+          "rule": "CLA s5D",
+          "title": "Causation"
+        }
+      ],
+      "classification_questions": [
+        {
+          "id": "mn2-q1",
+          "slot": "provider_type",
+          "question_web": "Who provided the diagnosis/treatment?",
+          "answer_type": "enum",
+          "options": [
+            "gp",
+            "hospital",
+            "specialist",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn2-q2",
+          "slot": "incident_date",
+          "question_web": "When was the (mis/delayed) diagnosis?",
+          "answer_type": "text",
+          "validation": "date",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn2-q3",
+          "slot": "harm_severity",
+          "question_web": "What harm did the delay cause?",
+          "answer_type": "enum",
+          "options": [
+            "none",
+            "minor",
+            "serious",
+            "permanent_impairment",
+            "death"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn2-q4",
+          "slot": "outcome_nature",
+          "question_web": "How would you describe it?",
+          "answer_type": "enum",
+          "options": [
+            "misdiagnosis",
+            "delayed_diagnosis",
+            "missed_diagnosis",
+            "not_sure"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn2-q5",
+          "slot": "second_opinion",
+          "question_web": "Have you had a second opinion?",
+          "answer_type": "enum",
+          "options": [
+            "yes",
+            "no",
+            "not_yet"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        }
+      ],
+      "default_pattern": {
+        "description": "Escalation-dominant — requires expert evidence on differential and timing",
+        "favours": "escalation"
+      },
+      "exceptions": [],
+      "damage_consistency_check": {
+        "expected": "n/a",
+        "on_mismatch": "n/a"
+      },
+      "band_logic": [
+        {
+          "when": "harm_severity = none",
+          "band": "unclear"
+        },
+        {
+          "when": "otherwise",
+          "band": "unclear",
+          "note": "medneg-requires-assessment"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "unclear",
+          "text_web": "Whether a misdiagnosis or delay amounts to negligence turns on what a competent practitioner would have done and whether the delay caused your harm — questions that need expert medical evidence. We'll have a lawyer review your matter and follow up. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": [
+        {
+          "condition": "harm_severity in (death, permanent_impairment)",
+          "action": "route_to_esc-serious-injury"
+        },
+        {
+          "condition": "always",
+          "action": "medneg-requires-assessment"
+        }
+      ],
+      "legal_signoff": {
+        "approved": true,
+        "version": "4e3fe60ac4c277b3635636f43d7d7c4929d6dc7449bcb884ff2d4fb178807185",
+        "by": "Legal Head — Goldman Global, provisional approval pending final UX-level sign-off (2026-07-05)",
+        "date": "2026-07-05"
+      }
+    },
+    {
+      "id": "mn3-medication-error",
+      "name": "Medication error",
+      "status": "ESCALATION_ONLY",
+      "rule_citations": [
+        {
+          "rule": "CLA s5O",
+          "title": "Peer professional opinion"
+        },
+        {
+          "rule": "CLA s5D",
+          "title": "Causation"
+        }
+      ],
+      "classification_questions": [
+        {
+          "id": "mn3-q1",
+          "slot": "provider_type",
+          "question_web": "Where did the error occur?",
+          "answer_type": "enum",
+          "options": [
+            "hospital",
+            "pharmacy",
+            "gp",
+            "specialist",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn3-q2",
+          "slot": "incident_date",
+          "question_web": "When did it happen?",
+          "answer_type": "text",
+          "validation": "date",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn3-q3",
+          "slot": "harm_severity",
+          "question_web": "What harm did you suffer?",
+          "answer_type": "enum",
+          "options": [
+            "none",
+            "minor",
+            "serious",
+            "permanent_impairment",
+            "death"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn3-q4",
+          "slot": "outcome_nature",
+          "question_web": "What kind of error?",
+          "answer_type": "enum",
+          "options": [
+            "wrong_drug",
+            "wrong_dose",
+            "allergy_ignored",
+            "interaction",
+            "not_sure"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        }
+      ],
+      "default_pattern": {
+        "description": "Escalation-dominant",
+        "favours": "escalation"
+      },
+      "exceptions": [],
+      "damage_consistency_check": {
+        "expected": "n/a",
+        "on_mismatch": "n/a"
+      },
+      "band_logic": [
+        {
+          "when": "harm_severity = none",
+          "band": "unclear"
+        },
+        {
+          "when": "otherwise",
+          "band": "unclear",
+          "note": "medneg-requires-assessment"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "unclear",
+          "text_web": "Medication-error claims need expert evidence on prescribing/dispensing standards and causation. We'll have a lawyer review your matter and follow up. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": [
+        {
+          "condition": "harm_severity in (death, permanent_impairment)",
+          "action": "route_to_esc-serious-injury"
+        },
+        {
+          "condition": "always",
+          "action": "medneg-requires-assessment"
+        }
+      ],
+      "legal_signoff": {
+        "approved": true,
+        "version": "4e3fe60ac4c277b3635636f43d7d7c4929d6dc7449bcb884ff2d4fb178807185",
+        "by": "Legal Head — Goldman Global, provisional approval pending final UX-level sign-off (2026-07-05)",
+        "date": "2026-07-05"
+      }
+    },
+    {
+      "id": "mn4-birth-injury",
+      "name": "Birth injury",
+      "status": "ESCALATION_ONLY_ALWAYS",
+      "rule_citations": [
+        {
+          "rule": "CLA s5O",
+          "title": "Peer professional opinion"
+        },
+        {
+          "rule": "CLA s5D",
+          "title": "Causation"
+        }
+      ],
+      "classification_questions": [
+        {
+          "id": "mn4-q1",
+          "slot": "provider_type",
+          "question_web": "Where did the birth/care take place?",
+          "answer_type": "enum",
+          "options": [
+            "hospital",
+            "birth_centre",
+            "home",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn4-q2",
+          "slot": "incident_date",
+          "question_web": "When did it happen?",
+          "answer_type": "text",
+          "validation": "date",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn4-q3",
+          "slot": "harm_severity",
+          "question_web": "Who was harmed and how seriously?",
+          "answer_type": "enum",
+          "options": [
+            "minor",
+            "serious",
+            "permanent_impairment",
+            "death"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        }
+      ],
+      "default_pattern": {
+        "description": "ALWAYS escalates as serious-injury — high-value, high-stakes",
+        "favours": "escalation"
+      },
+      "exceptions": [],
+      "damage_consistency_check": {
+        "expected": "n/a",
+        "on_mismatch": "n/a"
+      },
+      "band_logic": [
+        {
+          "when": "always",
+          "band": "unclear",
+          "note": "always escalate as esc-serious-injury"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "unclear",
+          "text_web": "Birth-injury matters are high-stakes and always require prompt, specialist legal and medical review. We'll have a lawyer contact you as a priority. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": [
+        {
+          "condition": "always",
+          "action": "route_to_esc-serious-injury"
+        }
+      ],
+      "legal_signoff": {
+        "approved": true,
+        "version": "4e3fe60ac4c277b3635636f43d7d7c4929d6dc7449bcb884ff2d4fb178807185",
+        "by": "Legal Head — Goldman Global, provisional approval pending final UX-level sign-off (2026-07-05)",
+        "date": "2026-07-05"
+      }
+    },
+    {
+      "id": "mn5-cosmetic-dental",
+      "name": "Cosmetic or dental treatment",
+      "status": "ESCALATION_ONLY",
+      "rule_citations": [
+        {
+          "rule": "CLA s5O",
+          "title": "Peer professional opinion"
+        },
+        {
+          "rule": "CLA s5D",
+          "title": "Causation"
+        }
+      ],
+      "classification_questions": [
+        {
+          "id": "mn5-q1",
+          "slot": "provider_type",
+          "question_web": "Who provided the treatment?",
+          "answer_type": "enum",
+          "options": [
+            "dentist",
+            "cosmetic",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn5-q2",
+          "slot": "incident_date",
+          "question_web": "When did it happen?",
+          "answer_type": "text",
+          "validation": "date",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn5-q3",
+          "slot": "harm_severity",
+          "question_web": "What harm did you suffer?",
+          "answer_type": "enum",
+          "options": [
+            "none",
+            "minor",
+            "serious",
+            "permanent_impairment"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn5-q4",
+          "slot": "outcome_nature",
+          "question_web": "What went wrong?",
+          "answer_type": "enum",
+          "options": [
+            "unexpected_outcome",
+            "suspected_error",
+            "not_sure"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        }
+      ],
+      "default_pattern": {
+        "description": "Escalation-dominant",
+        "favours": "escalation"
+      },
+      "exceptions": [],
+      "damage_consistency_check": {
+        "expected": "n/a",
+        "on_mismatch": "n/a"
+      },
+      "band_logic": [
+        {
+          "when": "harm_severity = none",
+          "band": "unclear"
+        },
+        {
+          "when": "otherwise",
+          "band": "unclear",
+          "note": "medneg-requires-assessment"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "unclear",
+          "text_web": "Cosmetic and dental negligence claims need expert evidence on the relevant professional standard. We'll have a lawyer review your matter and follow up. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": [
+        {
+          "condition": "always",
+          "action": "medneg-requires-assessment"
+        }
+      ],
+      "legal_signoff": {
+        "approved": true,
+        "version": "4e3fe60ac4c277b3635636f43d7d7c4929d6dc7449bcb884ff2d4fb178807185",
+        "by": "Legal Head — Goldman Global, provisional approval pending final UX-level sign-off (2026-07-05)",
+        "date": "2026-07-05"
+      }
+    },
+    {
+      "id": "mn6-consent-not-informed",
+      "name": "Consent — not informed",
+      "status": "ESCALATION_ONLY",
+      "rule_citations": [
+        {
+          "rule": "CLA s5O",
+          "title": "Peer professional opinion"
+        },
+        {
+          "rule": " Rogers v Whitaker principle",
+          "title": "Informed consent — material risk disclosure"
+        }
+      ],
+      "classification_questions": [
+        {
+          "id": "mn6-q1",
+          "slot": "provider_type",
+          "question_web": "Who provided the treatment?",
+          "answer_type": "enum",
+          "options": [
+            "gp",
+            "hospital",
+            "specialist",
+            "surgeon",
+            "dentist",
+            "cosmetic",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn6-q2",
+          "slot": "incident_date",
+          "question_web": "When did it happen?",
+          "answer_type": "text",
+          "validation": "date",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn6-q3",
+          "slot": "harm_severity",
+          "question_web": "What harm did you suffer?",
+          "answer_type": "enum",
+          "options": [
+            "none",
+            "minor",
+            "serious",
+            "permanent_impairment",
+            "death"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn6-q4",
+          "slot": "outcome_nature",
+          "question_web": "What risk do you believe wasn't disclosed?",
+          "answer_type": "text",
+          "validation": "non-empty",
+          "reprompt_max": 2
+        }
+      ],
+      "default_pattern": {
+        "description": "Escalation-dominant — informed-consent disputes turn on material-risk evidence",
+        "favours": "escalation"
+      },
+      "exceptions": [],
+      "damage_consistency_check": {
+        "expected": "n/a",
+        "on_mismatch": "n/a"
+      },
+      "band_logic": [
+        {
+          "when": "always",
+          "band": "unclear",
+          "note": "medneg-requires-assessment"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "unclear",
+          "text_web": "Whether consent was properly informed turns on what risks were material for you and what was disclosed — questions that need careful review. We'll have a lawyer assess your matter and follow up. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": [
+        {
+          "condition": "always",
+          "action": "medneg-requires-assessment"
+        }
+      ],
+      "legal_signoff": {
+        "approved": true,
+        "version": "4e3fe60ac4c277b3635636f43d7d7c4929d6dc7449bcb884ff2d4fb178807185",
+        "by": "Legal Head — Goldman Global, provisional approval pending final UX-level sign-off (2026-07-05)",
+        "date": "2026-07-05"
+      }
+    },
+    {
+      "id": "mn7-other",
+      "name": "Other medical-treatment matter (catch-all)",
+      "status": "ESCALATION_ONLY",
+      "rule_citations": [
+        {
+          "rule": "CLA s5O",
+          "title": "Peer professional opinion"
+        }
+      ],
+      "classification_questions": [
+        {
+          "id": "mn7-q1",
+          "slot": "provider_type",
+          "question_web": "Who provided the treatment?",
+          "answer_type": "enum",
+          "options": [
+            "gp",
+            "hospital",
+            "specialist",
+            "dentist",
+            "cosmetic",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn7-q2",
+          "slot": "incident_date",
+          "question_web": "When did it happen?",
+          "answer_type": "text",
+          "validation": "date",
+          "reprompt_max": 2
+        },
+        {
+          "id": "mn7-q3",
+          "slot": "harm_severity",
+          "question_web": "What harm did you suffer?",
+          "answer_type": "enum",
+          "options": [
+            "none",
+            "minor",
+            "serious",
+            "permanent_impairment",
+            "death"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        }
+      ],
+      "default_pattern": {
+        "description": "Catch-all — always escalate; no auto-band",
+        "favours": "escalation"
+      },
+      "exceptions": [],
+      "damage_consistency_check": {
+        "expected": "n/a",
+        "on_mismatch": "n/a"
+      },
+      "band_logic": [
+        {
+          "when": "always",
+          "band": "unclear",
+          "note": "medneg-requires-assessment"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "unclear",
+          "text_web": "Your matter doesn't fit a standard medical-negligence pattern but still warrants careful review. We'll have a lawyer assess it and follow up. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": [
+        {
+          "condition": "always",
+          "action": "medneg-requires-assessment"
+        }
+      ],
+      "legal_signoff": {
+        "approved": true,
+        "version": "4e3fe60ac4c277b3635636f43d7d7c4929d6dc7449bcb884ff2d4fb178807185",
+        "by": "Legal Head — Goldman Global, provisional approval pending final UX-level sign-off (2026-07-05)",
+        "date": "2026-07-05"
+      }
+    }
+  ]
+}

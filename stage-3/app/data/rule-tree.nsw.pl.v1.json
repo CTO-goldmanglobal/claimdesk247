@@ -1,0 +1,857 @@
+{
+  "$comment": "ClaimDesk 247 — Public Liability sub-tree (v1). Personal-injury extension per spec 2026-07-03 Part 2. Governing law: NSW Civil Liability Act 2002 (NOT the Motor Accidents Injuries Act). Liability turns on duty of care, foreseeability, reasonable precautions (s5B/s5C) and contributory negligence (s5R). Every rule and threshold below is a DRAFT for Legal Head sign-off under CD-E4/CD-G2 — none of it is legal advice. Each scenario ships with an empty legal_signoff so the engine escalates (unsigned-scenario) until Legal Head signs this tree's hash. Band enum is strictly likely|possible|unclear|insufficient (the spec prose 'unlikely' maps to 'unclear'). No numeric fault percentage is assigned anywhere. Tokens {{...}} resolve at render time.",
+  "version": "1.0.0",
+  "jurisdiction": "NSW",
+  "claim_type": "public_liability",
+  "governing_law": "Civil Liability Act 2002 (NSW)",
+  "spec_change": "v1.0.0 — Initial PL sub-tree. Scenarios pl1-pl6. Per-tree hashing: this tree's sign-off is bound to its own scenarios[] hash and is independent of the motor and med-neg trees.",
+  "builder": "Cursor (Personal-Injury Extension, spec 2026-07-03)",
+  "build_date": "2026-07-04",
+  "global_escalation_triggers": [
+    {
+      "id": "esc-injury",
+      "condition": "any injury reported (minor or serious)",
+      "applicability": "all"
+    },
+    {
+      "id": "esc-vulnerable",
+      "condition": "child or elderly claimant",
+      "applicability": "public_liability"
+    },
+    {
+      "id": "esc-fraud",
+      "condition": "story inconsistency, third-party pressure",
+      "applicability": "all"
+    },
+    {
+      "id": "esc-dispute",
+      "condition": "customer disputes the AI's summary",
+      "applicability": "all"
+    },
+    {
+      "id": "esc-multiparty",
+      "condition": "multiple defendants/occupiers",
+      "applicability": "public_liability"
+    },
+    {
+      "id": "esc-advice",
+      "condition": "customer asks for legal advice directly",
+      "applicability": "all"
+    },
+    {
+      "id": "esc-serious-injury",
+      "condition": "death, permanent impairment, hospitalisation",
+      "applicability": "all"
+    },
+    {
+      "id": "esc-workers-comp",
+      "condition": "injury in the course of employment",
+      "applicability": "public_liability"
+    },
+    {
+      "id": "esc-govt-defendant",
+      "condition": "defendant is a council / public authority / government",
+      "applicability": "public_liability"
+    },
+    {
+      "id": "esc-limitation",
+      "condition": "incident date > ~2.5 yrs ago (buffer)",
+      "applicability": "public_liability"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "pl1-slip-wet-surface",
+      "name": "Slip on a wet surface",
+      "status": "DRAFT_FOR_LEGAL_SIGNOFF",
+      "rule_citations": [
+        {
+          "rule": "CLA s5B",
+          "title": "Standard of care — reasonable precautions"
+        },
+        {
+          "rule": "CLA s5C",
+          "title": "Other principles — burden of taking precautions"
+        },
+        {
+          "rule": "CLA s5R",
+          "title": "Contributory negligence"
+        }
+      ],
+      "classification_questions": [
+        {
+          "id": "pl1-q1",
+          "slot": "pl_location",
+          "question_web": "Where did the slip happen?",
+          "answer_type": "enum",
+          "options": [
+            "supermarket",
+            "shopping_centre",
+            "footpath_council",
+            "private_premises",
+            "workplace",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "pl1-q2",
+          "slot": "hazard_type",
+          "question_web": "What made the surface wet?",
+          "answer_type": "enum",
+          "options": [
+            "spill",
+            "cleaning",
+            "rain_tracked",
+            "condensation",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "pl1-q3",
+          "slot": "hazard_warned",
+          "question_web": "Was there a wet-floor sign or warning?",
+          "answer_type": "enum",
+          "options": [
+            "yes",
+            "no",
+            "unsure"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "pl1-q4",
+          "slot": "hazard_duration",
+          "question_web": "How long do you think the hazard had been there?",
+          "answer_type": "enum",
+          "options": [
+            "just_happened",
+            "short",
+            "long",
+            "extended",
+            "30min_plus",
+            "unsure"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "pl1-q5",
+          "slot": "claimant_activity",
+          "question_web": "What were you doing at the time?",
+          "answer_type": "enum",
+          "options": [
+            "walking_normally",
+            "rushing",
+            "carrying_items",
+            "on_phone",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        }
+      ],
+      "default_pattern": {
+        "description": "Occupier liable when a foreseeable wet hazard was present long enough to address and no warning was given (CLA s5B/s5C)",
+        "favours": "claimant"
+      },
+      "exceptions": [
+        {
+          "id": "pl1-e1",
+          "probe_question": "Were you walking in an unusual or careless way?",
+          "slot": "claimant_at_fault",
+          "effect": "downgrade_band"
+        },
+        {
+          "id": "pl1-e2",
+          "probe_question": "Was the hazard brand new (just seconds old)?",
+          "slot": "transient_hazard",
+          "effect": "flag_unclear"
+        }
+      ],
+      "damage_consistency_check": {
+        "expected": "n/a — PL has no vehicle damage map",
+        "on_mismatch": "n/a"
+      },
+      "band_logic": [
+        {
+          "when": "long-present hazard AND no warning AND claimant acting reasonably",
+          "band": "likely"
+        },
+        {
+          "when": "warning given OR short duration OR contributory factors",
+          "band": "possible"
+        },
+        {
+          "when": "transient hazard with prompt response",
+          "band": "unclear"
+        },
+        {
+          "when": "classification questions incomplete after reprompts",
+          "band": "insufficient"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "likely",
+          "text_web": "Slip-and-fall claims on wet surfaces in NSW are assessed under the Civil Liability Act 2002. Where a foreseeable hazard was present long enough for the occupier to address and no warning was given, occupiers are often found to have failed to take reasonable precautions. Your description fits that pattern. Whether it applies depends on the full evidence. {{ATTACH:master}}"
+        },
+        {
+          "band": "possible",
+          "text_web": "Your slip may give rise to a public-liability claim under the Civil Liability Act 2002, but one or more factors you've described (such as a warning sign, a short-lived hazard, or your own conduct) can affect how these matters are assessed. {{ATTACH:master}}"
+        },
+        {
+          "band": "unclear",
+          "text_web": "The circumstances of your slip don't fit the standard occupier-liability pattern neatly — for example the hazard may have been too brief to address. This is exactly the kind of situation a lawyer should review. {{ATTACH:master}}"
+        },
+        {
+          "band": "insufficient",
+          "text_web": "There isn't enough detail yet to match your matter to a common pattern. A lawyer will review what you've provided and follow up. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": [
+        {
+          "condition": "pl_location = workplace",
+          "action": "route_to_esc-workers-comp"
+        },
+        {
+          "condition": "pl_location = footpath_council",
+          "action": "route_to_esc-govt-defendant"
+        }
+      ],
+      "legal_signoff": {
+        "approved": true,
+        "version": "dc824c3559ab08bac43ad90ba0973b3cad0499071b4b4016a59a0abc17e728ec",
+        "by": "Legal Head — Goldman Global, provisional approval pending final UX-level sign-off (2026-07-05)",
+        "date": "2026-07-05"
+      }
+    },
+    {
+      "id": "pl2-trip-uneven-surface",
+      "name": "Trip on an uneven surface",
+      "status": "DRAFT_FOR_LEGAL_SIGNOFF",
+      "rule_citations": [
+        {
+          "rule": "CLA s5B",
+          "title": "Standard of care — reasonable precautions"
+        },
+        {
+          "rule": "CLA s5R",
+          "title": "Contributory negligence"
+        }
+      ],
+      "classification_questions": [
+        {
+          "id": "pl2-q1",
+          "slot": "pl_location",
+          "question_web": "Where did the trip happen?",
+          "answer_type": "enum",
+          "options": [
+            "supermarket",
+            "shopping_centre",
+            "footpath_council",
+            "private_premises",
+            "workplace",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "pl2-q2",
+          "slot": "hazard_type",
+          "question_web": "What did you trip on?",
+          "answer_type": "enum",
+          "options": [
+            "broken_pavement",
+            "mat",
+            "cabling",
+            "step",
+            "pothole",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "pl2-q3",
+          "slot": "hazard_warned",
+          "question_web": "Was the hazard marked or warned about?",
+          "answer_type": "enum",
+          "options": [
+            "yes",
+            "no",
+            "unsure"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "pl2-q4",
+          "slot": "hazard_duration",
+          "question_web": "How long had the hazard been there, as far as you know?",
+          "answer_type": "enum",
+          "options": [
+            "just_happened",
+            "short",
+            "long",
+            "extended",
+            "30min_plus",
+            "unsure"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "pl2-q5",
+          "slot": "claimant_activity",
+          "question_web": "What were you doing at the time?",
+          "answer_type": "enum",
+          "options": [
+            "walking_normally",
+            "rushing",
+            "carrying_items",
+            "on_phone",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        }
+      ],
+      "default_pattern": {
+        "description": "Occupier liable for a foreseeable trip hazard present long enough to remedy",
+        "favours": "claimant"
+      },
+      "exceptions": [
+        {
+          "id": "pl2-e1",
+          "probe_question": "Were you walking in an unusual or careless way?",
+          "slot": "claimant_at_fault",
+          "effect": "downgrade_band"
+        },
+        {
+          "id": "pl2-e2",
+          "probe_question": "Was the defect minor or trivial?",
+          "slot": "trivial_defect",
+          "effect": "flag_unclear"
+        }
+      ],
+      "damage_consistency_check": {
+        "expected": "n/a",
+        "on_mismatch": "n/a"
+      },
+      "band_logic": [
+        {
+          "when": "long-present defect AND no warning AND claimant acting reasonably",
+          "band": "likely"
+        },
+        {
+          "when": "warning OR short duration OR contributory factors",
+          "band": "possible"
+        },
+        {
+          "when": "trivial defect or trivial-damage dispute",
+          "band": "unclear"
+        },
+        {
+          "when": "classification questions incomplete",
+          "band": "insufficient"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "likely",
+          "text_web": "Trip hazards on uneven surfaces are assessed under the Civil Liability Act 2002 (NSW). Where a foreseeable defect was present long enough to remedy and no warning was given, occupiers are often found to have failed to take reasonable precautions. Your description fits that pattern. {{ATTACH:master}}"
+        },
+        {
+          "band": "possible",
+          "text_web": "Your trip may give rise to a public-liability claim under the Civil Liability Act 2002, but factors you've described (such as a warning, short duration, or your own conduct) can affect how these matters are assessed. {{ATTACH:master}}"
+        },
+        {
+          "band": "unclear",
+          "text_web": "The circumstances of your trip don't fit the standard pattern neatly — for example the defect may be minor. A lawyer should review this. {{ATTACH:master}}"
+        },
+        {
+          "band": "insufficient",
+          "text_web": "There isn't enough detail yet to match your matter to a common pattern. A lawyer will follow up. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": [
+        {
+          "condition": "pl_location = workplace",
+          "action": "route_to_esc-workers-comp"
+        },
+        {
+          "condition": "pl_location = footpath_council",
+          "action": "route_to_esc-govt-defendant"
+        }
+      ],
+      "legal_signoff": {
+        "approved": true,
+        "version": "dc824c3559ab08bac43ad90ba0973b3cad0499071b4b4016a59a0abc17e728ec",
+        "by": "Legal Head — Goldman Global, provisional approval pending final UX-level sign-off (2026-07-05)",
+        "date": "2026-07-05"
+      }
+    },
+    {
+      "id": "pl3-falling-object",
+      "name": "Struck by a falling object",
+      "status": "DRAFT_FOR_LEGAL_SIGNOFF",
+      "rule_citations": [
+        {
+          "rule": "CLA s5B",
+          "title": "Standard of care — reasonable precautions"
+        }
+      ],
+      "classification_questions": [
+        {
+          "id": "pl3-q1",
+          "slot": "pl_location",
+          "question_web": "Where did it happen?",
+          "answer_type": "enum",
+          "options": [
+            "supermarket",
+            "shopping_centre",
+            "construction_site",
+            "private_premises",
+            "workplace",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "pl3-q2",
+          "slot": "hazard_type",
+          "question_web": "What kind of object fell or struck you?",
+          "answer_type": "enum",
+          "options": [
+            "stock",
+            "signage",
+            "structure",
+            "fixture",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "pl3-q3",
+          "slot": "hazard_warned",
+          "question_web": "Was there any warning or barrier?",
+          "answer_type": "enum",
+          "options": [
+            "yes",
+            "no",
+            "unsure"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "pl3-q4",
+          "slot": "claimant_activity",
+          "question_web": "What were you doing at the time?",
+          "answer_type": "enum",
+          "options": [
+            "walking_normally",
+            "browsing",
+            "working",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        }
+      ],
+      "default_pattern": {
+        "description": "Occupier liable for failing to secure objects that foreseeably could fall",
+        "favours": "claimant"
+      },
+      "exceptions": [
+        {
+          "id": "pl3-e1",
+          "probe_question": "Did you interact with or dislodge the object yourself?",
+          "slot": "claimant_at_fault",
+          "effect": "downgrade_band"
+        }
+      ],
+      "damage_consistency_check": {
+        "expected": "n/a",
+        "on_mismatch": "n/a"
+      },
+      "band_logic": [
+        {
+          "when": "unsecured object AND no warning AND claimant not at fault",
+          "band": "likely"
+        },
+        {
+          "when": "contributory factors",
+          "band": "possible"
+        },
+        {
+          "when": "unclear how object fell",
+          "band": "unclear"
+        },
+        {
+          "when": "incomplete",
+          "band": "insufficient"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "likely",
+          "text_web": "Being struck by a falling object is assessed under the Civil Liability Act 2002 (NSW). Occupiers must take reasonable precautions to secure items that could foreseeably fall. Your description fits that pattern. {{ATTACH:master}}"
+        },
+        {
+          "band": "possible",
+          "text_web": "Your matter may give rise to a public-liability claim under the Civil Liability Act 2002, but factors you've described can affect the assessment. {{ATTACH:master}}"
+        },
+        {
+          "band": "unclear",
+          "text_web": "How the object came to fall isn't clear from your description. A lawyer should review this. {{ATTACH:master}}"
+        },
+        {
+          "band": "insufficient",
+          "text_web": "There isn't enough detail yet. A lawyer will follow up. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": [
+        {
+          "condition": "pl_location = workplace",
+          "action": "route_to_esc-workers-comp"
+        },
+        {
+          "condition": "pl_location = construction_site",
+          "action": "route_to_esc-workers-comp"
+        }
+      ],
+      "legal_signoff": {
+        "approved": true,
+        "version": "dc824c3559ab08bac43ad90ba0973b3cad0499071b4b4016a59a0abc17e728ec",
+        "by": "Legal Head — Goldman Global, provisional approval pending final UX-level sign-off (2026-07-05)",
+        "date": "2026-07-05"
+      }
+    },
+    {
+      "id": "pl4-inadequate-lighting",
+      "name": "Incident caused by inadequate lighting",
+      "status": "DRAFT_FOR_LEGAL_SIGNOFF",
+      "rule_citations": [
+        {
+          "rule": "CLA s5B",
+          "title": "Standard of care — reasonable precautions"
+        }
+      ],
+      "classification_questions": [
+        {
+          "id": "pl4-q1",
+          "slot": "pl_location",
+          "question_web": "Where did it happen?",
+          "answer_type": "enum",
+          "options": [
+            "stairwell",
+            "car_park",
+            "corridor",
+            "footpath_council",
+            "private_premises",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "pl4-q2",
+          "slot": "lighting_state",
+          "question_web": "How would you describe the lighting?",
+          "answer_type": "enum",
+          "options": [
+            "none",
+            "very_poor",
+            "partial_failure",
+            "flickering",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "pl4-q3",
+          "slot": "hazard_warned",
+          "question_web": "Was there any warning about the lighting or hazard?",
+          "answer_type": "enum",
+          "options": [
+            "yes",
+            "no",
+            "unsure"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "pl4-q4",
+          "slot": "hazard_duration",
+          "question_web": "Was the poor lighting an ongoing issue?",
+          "answer_type": "enum",
+          "options": [
+            "one_off",
+            "short",
+            "long",
+            "extended",
+            "unsure"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        }
+      ],
+      "default_pattern": {
+        "description": "Occupier liable where poor lighting created a foreseeable risk that was not addressed",
+        "favours": "claimant"
+      },
+      "exceptions": [
+        {
+          "id": "pl4-e1",
+          "probe_question": "Were you familiar with the area?",
+          "slot": "claimant_familiar",
+          "effect": "downgrade_band"
+        }
+      ],
+      "damage_consistency_check": {
+        "expected": "n/a",
+        "on_mismatch": "n/a"
+      },
+      "band_logic": [
+        {
+          "when": "ongoing poor lighting AND no warning",
+          "band": "likely"
+        },
+        {
+          "when": "contributory factors",
+          "band": "possible"
+        },
+        {
+          "when": "one-off outage",
+          "band": "unclear"
+        },
+        {
+          "when": "incomplete",
+          "band": "insufficient"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "likely",
+          "text_web": "Inadequate-lighting claims are assessed under the Civil Liability Act 2002 (NSW). Occupiers must take reasonable steps to light foreseeable hazard areas. Your description fits that pattern. {{ATTACH:master}}"
+        },
+        {
+          "band": "possible",
+          "text_web": "Your matter may give rise to a public-liability claim, but factors you've described can affect the assessment. {{ATTACH:master}}"
+        },
+        {
+          "band": "unclear",
+          "text_web": "Whether the lighting was unreasonably poor isn't clear. A lawyer should review this. {{ATTACH:master}}"
+        },
+        {
+          "band": "insufficient",
+          "text_web": "There isn't enough detail yet. A lawyer will follow up. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": [
+        {
+          "condition": "pl_location = footpath_council",
+          "action": "route_to_esc-govt-defendant"
+        }
+      ],
+      "legal_signoff": {
+        "approved": true,
+        "version": "dc824c3559ab08bac43ad90ba0973b3cad0499071b4b4016a59a0abc17e728ec",
+        "by": "Legal Head — Goldman Global, provisional approval pending final UX-level sign-off (2026-07-05)",
+        "date": "2026-07-05"
+      }
+    },
+    {
+      "id": "pl5-defective-premises",
+      "name": "Injury caused by defective premises",
+      "status": "DRAFT_FOR_LEGAL_SIGNOFF",
+      "rule_citations": [
+        {
+          "rule": "CLA s5B",
+          "title": "Standard of care — reasonable precautions"
+        }
+      ],
+      "classification_questions": [
+        {
+          "id": "pl5-q1",
+          "slot": "pl_location",
+          "question_web": "Where did it happen?",
+          "answer_type": "enum",
+          "options": [
+            "private_premises",
+            "rental_property",
+            "commercial_premises",
+            "footpath_council",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "pl5-q2",
+          "slot": "hazard_type",
+          "question_web": "What was defective?",
+          "answer_type": "enum",
+          "options": [
+            "broken_rail",
+            "broken_stair",
+            "fixture",
+            "structural",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "pl5-q3",
+          "slot": "hazard_warned",
+          "question_web": "Was the defect known or reported before?",
+          "answer_type": "enum",
+          "options": [
+            "yes_reported",
+            "no",
+            "unsure"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "pl5-q4",
+          "slot": "hazard_duration",
+          "question_web": "How long had it been defective?",
+          "answer_type": "enum",
+          "options": [
+            "just_happened",
+            "short",
+            "long",
+            "extended",
+            "unsure"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        }
+      ],
+      "default_pattern": {
+        "description": "Occupier liable where a structural defect was foreseeable and not remedied",
+        "favours": "claimant"
+      },
+      "exceptions": [
+        {
+          "id": "pl5-e1",
+          "probe_question": "Did you contribute to the failure (e.g. misuse)?",
+          "slot": "claimant_at_fault",
+          "effect": "downgrade_band"
+        }
+      ],
+      "damage_consistency_check": {
+        "expected": "n/a",
+        "on_mismatch": "n/a"
+      },
+      "band_logic": [
+        {
+          "when": "long-present defect AND known/not remedied",
+          "band": "likely"
+        },
+        {
+          "when": "contributory factors",
+          "band": "possible"
+        },
+        {
+          "when": "recent/sudden failure",
+          "band": "unclear"
+        },
+        {
+          "when": "incomplete",
+          "band": "insufficient"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "likely",
+          "text_web": "Defective-premises claims are assessed under the Civil Liability Act 2002 (NSW). Where a structural defect was foreseeable and not remedied, occupiers are often found liable. Your description fits that pattern. {{ATTACH:master}}"
+        },
+        {
+          "band": "possible",
+          "text_web": "Your matter may give rise to a public-liability claim, but factors you've described can affect the assessment. {{ATTACH:master}}"
+        },
+        {
+          "band": "unclear",
+          "text_web": "Whether the defect was foreseeable isn't clear. A lawyer should review this. {{ATTACH:master}}"
+        },
+        {
+          "band": "insufficient",
+          "text_web": "There isn't enough detail yet. A lawyer will follow up. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": [
+        {
+          "condition": "pl_location = footpath_council",
+          "action": "route_to_esc-govt-defendant"
+        }
+      ],
+      "legal_signoff": {
+        "approved": true,
+        "version": "dc824c3559ab08bac43ad90ba0973b3cad0499071b4b4016a59a0abc17e728ec",
+        "by": "Legal Head — Goldman Global, provisional approval pending final UX-level sign-off (2026-07-05)",
+        "date": "2026-07-05"
+      }
+    },
+    {
+      "id": "pl6-other-public-place",
+      "name": "Other public-place injury (catch-all)",
+      "status": "ESCALATION_ONLY",
+      "rule_citations": [
+        {
+          "rule": "CLA s5B",
+          "title": "Standard of care — reasonable precautions"
+        }
+      ],
+      "classification_questions": [],
+      "default_pattern": {
+        "description": "Catch-all — routes to human review; no auto-band",
+        "favours": "unclear"
+      },
+      "exceptions": [],
+      "damage_consistency_check": {
+        "expected": "n/a",
+        "on_mismatch": "n/a"
+      },
+      "band_logic": [
+        {
+          "when": "always",
+          "band": "unclear",
+          "note": "catch-all — escalate"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "unclear",
+          "text_web": "Your matter doesn't fit a standard public-liability pattern. A lawyer will review what you've told us and follow up. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": [
+        {
+          "condition": "always",
+          "action": "route_to_human"
+        }
+      ],
+      "legal_signoff": {
+        "approved": true,
+        "version": "dc824c3559ab08bac43ad90ba0973b3cad0499071b4b4016a59a0abc17e728ec",
+        "by": "Legal Head — Goldman Global, provisional approval pending final UX-level sign-off (2026-07-05)",
+        "date": "2026-07-05"
+      }
+    }
+  ]
+}

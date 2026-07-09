@@ -706,35 +706,48 @@ def _drive_signoff_signed(case: dict) -> tuple[bool, str]:
 
 
 def _drive_signoff_unsigned(case: dict) -> tuple[bool, str]:
-    """T-1-02: a scenario with approved=False escalates (G-PROD-LOCK)."""
-    er = classify({
-        "state": "NSW", "accident_type": "rear-end",
-        "user_position": "front", "user_motion": "stopped",
-        "chain_count": 2, "sudden_braking": "no", "brake_lights": "working",
-        "damage": {"user": "rear", "other": "front"}, "injuries": "none",
-    })
+    """T-1-02: a scenario with approved=False escalates (G-PROD-LOCK).
+
+    Once the live motor tree is signed (Legal Head sign-off 2026-07-05), the
+    live tree no longer demonstrates the unsigned path. So we patch in a copy
+    of the motor tree with every sign-off stripped, and assert the gate
+    rejects it. This keeps the test valid regardless of the live sign-off
+    state — the gate mechanism itself is what's under test."""
+    import copy
+    import app.engine as _eng
+    real = _eng._load_rule_tree
+    real.cache_clear()
+    fake = copy.deepcopy(real())
+    for s in fake["scenarios"]:
+        s["legal_signoff"] = {"approved": False, "version": "", "by": "", "date": ""}
+    _eng._load_rule_tree = lambda: fake  # type: ignore[assignment]
+    try:
+        er = classify({
+            "state": "NSW", "accident_type": "rear-end",
+            "user_position": "front", "user_motion": "stopped",
+            "chain_count": 2, "sudden_braking": "no", "brake_lights": "working",
+            "damage": {"user": "rear", "other": "front"}, "injuries": "none",
+        })
+    finally:
+        _eng._load_rule_tree = real  # type: ignore[assignment]
+        real.cache_clear()
     if er.band is not None:
         return False, f"unsigned scenario should NOT produce a band; got band={er.band!r}"
     if er.escalation != "unsigned-scenario":
         return False, f"expected escalation='unsigned-scenario', got {er.escalation!r}"
     if "scenario s1-rear-end" not in (er.escalation_reason or ""):
         return False, f"escalation_reason should reference s1-rear-end, got {er.escalation_reason!r}"
-    return True, f"unsigned scenario -> escalation={er.escalation} (G-PROD-LOCK)"
+    return True, f"unsigned scenario -> escalation={er.escalation} (G-PROD-LOCK; gate mechanism via patched unsigned tree)"
 
 
 def _drive_signoff_stale(case: dict) -> tuple[bool, str]:
     """T-1-03: a scenario with approved=True but a mismatched version hash
-    escalates as 'stale-signoff' (G-VER)."""
-    er = classify({
-        "state": "NSW", "accident_type": "T-intersection",
-        "user_road_type": "terminating_road", "user_motion": "moving",
-        "other_vehicle_motion": "already_through", "injuries": "none",
-    })
-    # In a freshly-loaded engine, s2-giveway-t has no signoff, so this
-    # passes the unsigned-scenario check. To exercise the stale-signoff
-    # path, we need to construct a scenario with approved=True and a
-    # version that doesn't match. We do this by checking the helper
-    # directly with a synthetic scenario.
+    escalates as 'stale-signoff' (G-VER).
+
+    The stale-signoff path is exercised via the `_check_legal_signoff` helper
+    with a synthetic scenario carrying an approved=True but mismatched version.
+    (We can't use the live tree for this because Legal Head's signed it; the
+    helper is the precise unit under test.)"""
     from app.engine import _check_legal_signoff
     fake_scenario = {
         "id": "synthetic", "name": "stale-test",
@@ -746,7 +759,7 @@ def _drive_signoff_stale(case: dict) -> tuple[bool, str]:
         return False, "stale signoff should NOT pass"
     if reason != "stale-signoff":
         return False, f"expected reason='stale-signoff', got {reason!r}"
-    return True, f"stale-signoff correctly detected (G-VER); live unsigned scenario also escalated as {er.escalation}"
+    return True, "stale-signoff correctly detected (G-VER)"
 
 
 def _drive_signoff_hash_deterministic(case: dict) -> tuple[bool, str]:
@@ -1078,6 +1091,17 @@ def main() -> int:
     write_report(total, passes, fails, results)
     # Also echo to stdout
     print(f"TOTAL: {total}  PASS: {passes}  FAIL: {fails}")
+
+    # Personal-injury extension suite (spec 2026-07-03). Runs as a separate,
+    # clearly-counted suite so the 99/99 motor discipline stays canonical.
+    try:
+        from tests.run_injury_extension import main as _run_ix
+    except ImportError:
+        _run_ix = None
+    if _run_ix is not None:
+        ix_rc = _run_ix()
+        if ix_rc != 0:
+            fails += 1  # surface extension failure in the aggregate exit code
     return 0 if fails == 0 else 1
 
 

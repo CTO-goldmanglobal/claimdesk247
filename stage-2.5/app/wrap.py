@@ -238,6 +238,32 @@ SLOT_UI: dict[str, dict[str, str]] = {
     "photos_taken":         {"prompt": "Did you take photos at the scene?", "inputType": "single_choice"},
     "other_driver_details": {"prompt": "Did you exchange details with the other driver? (optional)", "inputType": "text"},
     "injuries":             {"prompt": "Was anyone injured?", "inputType": "single_choice"},
+    # Personal-injury extension slots (spec §1.3, §2.1, §3.1)
+    "claim_type":           {"prompt": "What kind of claim is this?", "inputType": "single_choice"},
+    "incident_date":        {"prompt": "When did it happen?", "inputType": "date"},
+    # Public Liability
+    "pl_location":          {"prompt": "Where did it happen?", "inputType": "single_choice"},
+    "hazard_type":          {"prompt": "What kind of hazard caused it?", "inputType": "single_choice"},
+    "hazard_warned":        {"prompt": "Was there any warning about the hazard?", "inputType": "single_choice"},
+    "hazard_duration":      {"prompt": "How long had the hazard been there, as far as you know?", "inputType": "single_choice"},
+    "claimant_activity":    {"prompt": "What were you doing at the time? (optional)", "inputType": "single_choice"},
+    "defendant_type":       {"prompt": "Who is responsible for the place? (optional)", "inputType": "single_choice"},
+    "at_work":              {"prompt": "Did it happen while you were at work? (optional)", "inputType": "single_choice"},
+    "harm_severity":        {"prompt": "How serious was the harm you suffered?", "inputType": "single_choice"},
+    # Medical Negligence
+    "provider_type":        {"prompt": "Who provided the treatment or care?", "inputType": "single_choice"},
+    "provider_public_private": {"prompt": "Was the provider public or private? (optional)", "inputType": "single_choice"},
+    "treatment_type":       {"prompt": "What kind of treatment or care was involved?", "inputType": "single_choice"},
+    "outcome_nature":       {"prompt": "How would you describe what went wrong?", "inputType": "single_choice"},
+    "second_opinion":       {"prompt": "Have you had a second medical opinion? (optional)", "inputType": "single_choice"},
+    "multiple_providers":   {"prompt": "Were multiple providers or facilities involved? (optional)", "inputType": "single_choice"},
+    # Property Damage (Lane 1 — third-party motor recovery)
+    "collision_type":       {"prompt": "What kind of collision was it?", "inputType": "single_choice"},
+    "police_event_number":  {"prompt": "Do you have a police event number? (optional)", "inputType": "text"},
+    "at_fault_uninsured":   {"prompt": "Does the other driver have insurance cover?", "inputType": "single_choice"},
+    "repairer_quote":       {"prompt": "Do you have a repairer's quote or assessment? (optional)", "inputType": "text"},
+    "vehicle_class":        {"prompt": "What kind of vehicle were you driving? (optional)", "inputType": "single_choice"},
+    "hire_need":            {"prompt": "Do you need a replacement vehicle while yours is off the road? (optional)", "inputType": "single_choice"},
 }
 
 # Calm handoff copy shown when the engine escalates (serious injury,
@@ -271,6 +297,117 @@ _OPTION_LABELS: dict[str, str] = {
     "sideswipe_same_direction": "Sideswipe — both going the same way",
     "multi_vehicle": "Multiple vehicles (3 or more)",
     "not_listed": "Something else / I'm not sure",
+    # claim_type (spec §1.3)
+    "motor": "I was hurt in a car accident",
+    "property_damage": "My car was damaged — I wasn't at fault (repairs & replacement vehicle)",
+    "public_liability": "I was hurt in a public place / on someone's property",
+    "medical_negligence": "I was hurt by medical treatment / care",
+    # PL locations
+    "supermarket": "Supermarket",
+    "shopping_centre": "Shopping centre",
+    "footpath_council": "Footpath / council land",
+    "private_premises": "Private premises",
+    "workplace": "At work",
+    "construction_site": "Construction site",
+    "rental_property": "Rental property",
+    "commercial_premises": "Commercial premises",
+    "stairwell": "Stairwell",
+    "car_park": "Car park",
+    "corridor": "Corridor",
+    # hazard types
+    "wet_surface": "Wet surface (spill, cleaning, rain)",
+    "spill": "Spill",
+    "rain_tracked": "Rain-tracked water",
+    "cleaning": "Cleaning",
+    "uneven_surface": "Uneven surface",
+    "broken_pavement": "Broken pavement",
+    "mat": "Loose mat",
+    "cabling": "Cabling",
+    "step": "Step / change of level",
+    "pothole": "Pothole",
+    "falling_object": "Falling object",
+    "stock": "Falling stock",
+    "signage": "Falling signage",
+    "inadequate_lighting": "Inadequate lighting",
+    "defective_premises": "Defective premises",
+    "broken_rail": "Broken handrail",
+    "broken_stair": "Broken stair",
+    "fixture": "Defective fixture",
+    "other_public_place": "Another public place",
+    # hazard_warned / at_work
+    "yes": "Yes",
+    "no": "No",
+    "unsure": "I'm not sure",
+    # hazard_duration
+    "just_happened": "Just happened (seconds)",
+    "short": "A short time",
+    "long": "A long time",
+    "extended": "Extended period",
+    "30min_plus": "30 minutes or more",
+    # claimant_activity
+    "walking_normally": "Walking normally",
+    "rushing": "Rushing",
+    "carrying_items": "Carrying things",
+    "on_phone": "On my phone",
+    "browsing": "Browsing",
+    "working": "Working",
+    # defendant_type
+    "private_occupier": "A private occupier / owner",
+    "council": "Council",
+    "public_authority": "A public authority",
+    "government": "Government",
+    "business": "A business",
+    "unknown": "I don't know",
+    # harm_severity
+    "none": "No physical harm",
+    "minor": "Minor",
+    "serious": "Serious",
+    "permanent_impairment": "Permanent impairment",
+    "death": "Death",
+    # provider_type
+    "gp": "GP",
+    "hospital": "Hospital",
+    "specialist": "Specialist",
+    "surgeon": "Surgeon",
+    "dentist": "Dentist",
+    "cosmetic": "Cosmetic provider",
+    "pharmacy": "Pharmacy",
+    "birth_centre": "Birth centre",
+    # provider_public_private
+    "public": "Public",
+    "private": "Private",
+    # treatment_type
+    "surgical_outcome": "Surgical outcome",
+    "misdiagnosis_delay": "Misdiagnosis or delayed diagnosis",
+    "medication_error": "Medication error",
+    "birth_injury": "Birth injury",
+    "dental": "Dental treatment",
+    "consent_not_informed": "I wasn't properly informed / didn't consent",
+    # outcome_nature
+    "unexpected_outcome": "An unexpected outcome",
+    "suspected_error": "What I think was an error",
+    "not_sure": "I'm not sure",
+    "communication_only": "Only a problem with communication / manner",
+    # second_opinion / multiple_providers
+    "not_yet": "Not yet",
+    # injuries (already has none/minor/serious above via harm_severity overlaps)
+    # Property Damage — collision_type (PD-specific; mirrors motor geometry but
+    # framed for the not-at-fault recovery customer).
+    "give_way": "Give-way or stop sign / line",
+    "lane_change": "Changing lanes",
+    "parking": "Parking manoeuvre",
+    # PD — at_fault_uninsured
+    "at_fault_uninsured": "Uninsured driver",
+    # PD — vehicle_class
+    "small": "Small / hatchback",
+    "sedan": "Sedan / wagon",
+    "suv_4wd": "SUV / 4WD",
+    "ute_van": "Ute / van",
+    "prestige_luxury": "Prestige / luxury",
+    "commercial_heavy": "Commercial / heavy vehicle",
+    # PD — hire_need
+    "yes_needed": "Yes — I need a replacement vehicle",
+    "no_not_needed": "No — I have another option",
 }
 
 
@@ -283,10 +420,36 @@ def _opt_label(value: str) -> str:
     return value.replace("-", " ").replace("_", " ").capitalize()
 
 
+def _slot_question_for(slot_def: dict[str, Any]) -> dict[str, Any]:
+    """Build a frontend SlotQuestion for a given slot def (any branch)."""
+    ui = SLOT_UI.get(slot_def["slot"], {"prompt": slot_def["slot"], "inputType": _input_type_for(slot_def["type"])})
+    options = None
+    if slot_def.get("options"):
+        options = [{"value": v, "label": _opt_label(v)} for v in slot_def["options"]]
+    return {
+        "slot": slot_def["slot"],
+        "prompt": ui["prompt"],
+        "inputType": ui["inputType"],
+        "options": options,
+        "done": False,
+    }
+
+
+def _input_type_for(slot_type: str) -> str:
+    """Map a state-machine slot type to a frontend input type."""
+    return {
+        "enum": "single_choice",
+        "multienum": "multi_choice",
+        "integer": "text",
+        "text": "text",
+    }.get(slot_type, "text")
+
+
 def _slot_question(idx: int) -> dict[str, Any]:
-    """Build a frontend SlotQuestion for SLOT_DEFINITIONS[idx]."""
+    """Build a frontend SlotQuestion for SLOT_DEFINITIONS[idx] (motor, back-compat).
+    Kept for the engine-contract mode that the acceptance tests drive."""
     sd = stage3_state_machine.SLOT_DEFINITIONS[idx]
-    ui = SLOT_UI.get(sd["slot"], {"prompt": sd["slot"], "inputType": "text"})
+    ui = SLOT_UI.get(sd["slot"], {"prompt": sd["slot"], "inputType": _input_type_for(sd["type"])})
     options = None
     if sd.get("options"):
         options = [{"value": v, "label": _opt_label(v)} for v in sd["options"]]
@@ -305,18 +468,22 @@ _DONE_QUESTION: dict[str, Any] = {
 
 
 def _progress(intake: dict[str, Any]) -> dict[str, int]:
-    """Progress over the mandatory slots (the only ones the engine asks)."""
-    mandatory = [sd for sd in stage3_state_machine.SLOT_DEFINITIONS if sd["mandatory"]]
+    """Progress over the mandatory slots of the ACTIVE branch (the only ones
+    the engine asks). Branches by claim_type so PL/med-neg get their own totals."""
+    active = stage3_state_machine._active_slots(intake, frontend=True)  # type: ignore[attr-defined]
+    mandatory = [sd for sd in active if sd["mandatory"]]
     answered = sum(1 for sd in mandatory if intake.get(sd["slot"]))
     return {"answered": answered, "total": len(mandatory)}
 
 
 def _next_question(intake: dict[str, Any]) -> dict[str, Any]:
-    """The next SlotQuestion to ask, or the done sentinel."""
+    """The next SlotQuestion to ask, or the done sentinel. Uses the active
+    branch (motor by default; PL/med-neg when claim_type is set)."""
+    active = stage3_state_machine._active_slots(intake, frontend=True)  # type: ignore[attr-defined]
     idx = stage3_state_machine._next_slot_index(intake)  # type: ignore[attr-defined]
-    if idx >= len(stage3_state_machine.SLOT_DEFINITIONS):
+    if idx >= len(active):
         return dict(_DONE_QUESTION)
-    return _slot_question(idx)
+    return _slot_question_for(active[idx])
 
 
 _SCENARIO_INPUT_TYPE = {
@@ -405,12 +572,36 @@ def create_app() -> FastAPI:
     # ---- /healthz (G-47 + G-VER) ----
     @app.get("/healthz")
     def healthz() -> Any:
-        tree = stage3_engine._load_rule_tree()  # type: ignore[attr-defined]
+        tree = stage3_engine._load_rule_tree()  # type: ignore[attr-defined]  # motor tree
+        # Personal-injury extension (spec §1.2): report a per-claim_type map so
+        # the deployer can see which sub-trees are signed and live.
+        registry = getattr(stage3_engine, "RULE_TREE_REGISTRY", {"motor": "rule-tree.nsw.v3.json"})
+        rule_tree_versions: dict[str, Any] = {}
+        for claim_type in sorted(registry):
+            try:
+                ct_tree = stage3_engine._load_rule_tree_for(claim_type)  # type: ignore[attr-defined]
+            except Exception as exc:  # noqa: BLE001 — healthz must never crash
+                rule_tree_versions[claim_type] = {"error": str(exc)}
+                continue
+            scenarios = ct_tree.get("scenarios", [])
+            signed = sum(
+                1 for s in scenarios
+                if isinstance(s.get("legal_signoff"), dict)
+                and s["legal_signoff"].get("approved") is True
+            )
+            rule_tree_versions[claim_type] = {
+                "version": ct_tree.get("version", "unknown"),
+                "hash": stage3_engine._compute_scenarios_hash(ct_tree),  # type: ignore[attr-defined]
+                "scenarios": len(scenarios),
+                "signed": signed,
+                "live": signed == len(scenarios),  # all scenarios signed -> live
+            }
         return {
             "status": "ok",
             "engine_version": "1.0.0",
-            "rule_tree_version": tree.get("version", "unknown"),
-            "rule_tree_hash": stage3_engine._compute_scenarios_hash(tree),  # G-VER
+            "rule_tree_version": tree.get("version", "unknown"),  # motor (back-compat)
+            "rule_tree_hash": stage3_engine._compute_scenarios_hash(tree),  # G-VER, motor
+            "rule_tree_versions": rule_tree_versions,  # per claim_type
             "api_version": STAGE25_VERSION,
         }
 
@@ -523,11 +714,23 @@ def create_app() -> FastAPI:
             if not req.slot:
                 return {"ref": s.reference, "next": _next_question(s.intake),
                         "progress": _progress(s.intake)}
+            # Look up the slot id within the active branch (motor by default;
+            # PL/med-neg once claim_type is set). The claim_type slot itself
+            # (id 100) is resolvable before a branch is chosen.
+            active = stage3_state_machine._active_slots(s.intake, frontend=True)  # type: ignore[attr-defined]
             slot_id = None
-            for sid, sd in enumerate(stage3_state_machine.SLOT_DEFINITIONS, 1):
+            for sd in active:
                 if sd["slot"] == req.slot:
-                    slot_id = sid
+                    slot_id = sd["id"]
                     break
+            if slot_id is None and req.slot == stage3_state_machine.CLAIM_TYPE_SLOT["slot"]:
+                slot_id = stage3_state_machine.CLAIM_TYPE_SLOT["id"]
+            if slot_id is None:
+                # Backward-compat: motor slot submitted before claim_type is set.
+                for sd in stage3_state_machine.MOTOR_SLOTS:
+                    if sd["slot"] == req.slot:
+                        slot_id = sd["id"]
+                        break
             if slot_id is None:
                 raise HTTPException(status_code=400, detail=f"unknown slot: {req.slot}")
             stage3_state_machine.submit_slot(s, slot_id, req.value)

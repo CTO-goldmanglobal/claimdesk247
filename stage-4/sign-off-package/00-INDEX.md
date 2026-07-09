@@ -2,11 +2,28 @@
 
 **Project:** AI Legal Receptionist + Accident Intake System
 **Stage:** 4 of 5 (Phase 1 MVP) — Staging Deploy · AU Region · QA · Sign-Off
-**Issued:** 2026-06-13 · **Refreshed:** 2026-06-14 (live evidence captured — see "Live verification status" below)
+**Issued:** 2026-06-13 · **Refreshed:** 2026-06-14 (live evidence captured — see "Live verification status" below) · **Sign-off gate closed:** 2026-07-05 (Legal Head provisional approval — see "Sign-off event" below)
 **Loop:** Fables (Plan) → Cursor + MiniMax M3 (Build) → Fables (Audit)
 **Governed by:** `LOOP-OPERATING-RULES.md`
 
 This package is the **single consolidated deliverable** for legal-firm sign-off (Loop Request §12). The firm conducts one review; revisions are absorbed in one cycle at Stage 5.
+
+> ## 🔏 SIGN-OFF EVENT — 2026-07-05
+>
+> Legal Head gave provisional approval to proceed ("go ahead") on 2026-07-05, with final sign-off gated on the UX level being complete. The G-PROD-LOCK / G-VER sign-off gate has been **closed** by signing all four rule trees via `stage-4/scripts/sign_rule_trees.py`:
+>
+> | Tree | Scenarios | Hash (SHA-256, first 12) | Live |
+> |------|-----------|--------------------------|------|
+> | motor | 11 | `3964e668d905` | ✅ true |
+> | property_damage | 7 | `1f13febaf6c0` | ✅ true |
+> | public_liability | 6 | `dc824c3559ab` | ✅ true |
+> | medical_negligence | 7 | `4e3fe60ac4c2` | ✅ true |
+>
+> **Signed by:** Legal Head — Goldman Global, provisional approval pending final UX-level sign-off (2026-07-05).
+>
+> **Effect:** the engine now EMITS bands for signed scenarios (was: escalated everything as `unsigned-scenario`). `/healthz` reports `live: true` for all four trees. Any later edit to a scenario invalidates its hash and the engine re-escalates as `stale-signoff` until re-signed (G-VER).
+>
+> **Caveat — PROVISIONAL:** this sign-off is recorded against the builder's content hashes and authorises the engine to emit bands for internal/staging validation. It is NOT the final commercial sign-off. The remaining gates are: (1) the UX-level review (in progress — home page reframed to the PD beachhead, `ClaimType` extended), (2) the counsel memo for PD (agent licensing + ACL/CHOICE disclosures + fee structure), and (3) the CD-R2 redo for each tree's touting/claim-farming surface. Verify before any public deployment with `python3 stage-4/scripts/sign_rule_trees.py --verify`.
 
 **Status legend**
 - [CODE] — Builder evidence. Lives in the repo, attached for review.
@@ -15,18 +32,27 @@ This package is the **single consolidated deliverable** for legal-firm sign-off 
 
 ---
 
-## Index — 8 Sign-Off Items
+## Index — 8 Sign-Off Items (+ 3 personal-injury / property-damage extension items)
 
 | # | §12 item | Artefact (CODE) | Live evidence (DEPLOYER-EVIDENCE) | Status |
 |---|----------|-----------------|----------------------------------|--------|
 | 1 | All disclaimer text (screen + voice) | `stage-3/app/data/disclaimers.v1.complete.json` + `stage-1/spec/disclaimers.v1.md` | Screenshot of /api/classify response with `disclaimerText` populated + voice transcript (QA-1) | [CODE] |
-| 2 | Fault rule tree + output framing | `stage-3/app/data/rule-tree.nsw.v3.json` + `stage-1/deliverables/rule-tree-review.md` | Sample classifications from staging (T-25-001 to T-25-005) | [CODE] |
-| 3 | Escalation trigger list (7 triggers) | `stage-3/app/engine.py:ENGINE_TRIGGERS` (lines 482-512) + the 7 trigger list in `stage-1/deliverables/flows.md` | QA-2 (serious injury) and QA-4 (advice request) transcripts | [CODE] + [DEPLOYER-EVIDENCE] |
+| 2 | Fault rule tree + output framing (MOTOR) | `stage-3/app/data/rule-tree.nsw.v3.json` + `stage-1/deliverables/rule-tree-review.md` | Sample classifications from staging (T-25-001 to T-25-005) | [CODE] — **SIGNED 2026-07-05 (11/11 scenarios, hash `3964e668d905`)** |
+| **2b** | **Public Liability rule tree (NEW)** | `stage-3/app/data/rule-tree.nsw.pl.v1.json` + `stage-4/sign-off-package/item-2b-rule-tree-public-liability.md` | `/healthz` rule_tree_versions + IX-01/05/06/09 green | **[CODE] — SIGNED 2026-07-05 (6/6 scenarios, hash `dc824c3559ab`); bands now emitted** |
+| **2c** | **Medical Negligence rule tree (NEW)** | `stage-3/app/data/rule-tree.nsw.medneg.v1.json` + `stage-4/sign-off-package/item-2c-rule-tree-medneg.md` | `/healthz` rule_tree_versions + IX-02/03/04 green | **[CODE] — SIGNED 2026-07-05 (7/7 scenarios, hash `4e3fe60ac4c2`); escalation-dominant by design (IX-03)** |
+| **2d** | **Property Damage rule tree (NEW — Lane 1 beachhead)** | `stage-3/app/data/rule-tree.nsw.pd.v1.json` + `stage-4/sign-off-package/item-2d-rule-tree-property-damage.md` | `/healthz` rule_tree_versions + IX-11..17 green | **[CODE] — SIGNED 2026-07-05 (7/7 scenarios, hash `1f13febaf6c0`); bands emitted deterministically (IX-15)** |
+| 3 | Escalation trigger list (7 motor + 4 injury-ext + 1 PD-ext = 12 triggers) | `stage-3/app/engine.py:_check_global_escalations` + the trigger lists in each rule tree's `global_escalation_triggers` | QA-2 (serious injury) and QA-4 (advice request) transcripts | [CODE] + [DEPLOYER-EVIDENCE] |
 | 4 | Privacy notice + consent wording | `stage-3/app/data/disclaimers.v1.complete.json` (privacy + recording) | QA-8 (consent declined) — verify nothing persisted in Supabase | [CODE] + [DEPLOYER-EVIDENCE] |
 | 5 | Customer PDF summary template | `stage-3/app/pdf_gen.py` (output uses `spec/pdf-summary.v1.md`) | QA-1 PDF generated from staging | [CODE] + [DEPLOYER-EVIDENCE] |
 | 6 | Insurer correspondence draft | **§7 OPEN DECISION** | See §7 below — either template or "Phase 2" note | [PENDING-FIRM] |
 | 7 | Data retention + storage policy | `architecture/INFRA-PROVISIONING-CHECKLIST.md` (region + retention rules) | Region screenshots (Supabase = Sydney; Vercel PII = syd1) + retention value | [CODE] + [DEPLOYER-EVIDENCE] |
 | 8 | Audit log specification | `stage-3/app/audit.py` (immutable in-process log) + `stage-4/app/supabase_store.py` (DB schema with append-only policies) | QA-11 (UPDATE/DELETE rejected) + QA-12 (export as admin) | [CODE] + [DEPLOYER-EVIDENCE] |
+
+> **Personal-injury + property-damage extension (2026-07-05) — SIGN-OFF CLOSED:** Items 2b (PL), 2c (med-neg) and 2d (PD) are sub-trees in the per-`claim_type` registry. All four trees were **signed on 2026-07-05** via `stage-4/scripts/sign_rule_trees.py` after Legal Head gave provisional approval. Per-tree hashing (CD-E4) means each tree's sign-off is bound to its own scenarios[] hash, independent of the others — re-signing one does not affect the rest.
+>
+> **Provisional, not final.** The sign-off authorises the engine to emit bands for staging/internal validation. Before any commercial deployment: (1) the **CD-R2 (touting/claim-farming) analysis MUST be redone separately for each tree** — the motor analysis covers none of them (PL/med-neg = Civil Liability Act 2002; PD = common-law negligence + Arsalan, with its own ACL/debt-collection-agent licensing surface); (2) the **PD counsel memo** must be delivered (agent licensing + ACL/CHOICE disclosures + fee structure); (3) the **UX-level review** must be signed off.
+>
+> **Item 2d (PD) is the strategic beachhead** per `HOW-TO-WIN-3P-MOTOR` / `THIRD-PARTY-MOTOR-CLAIM-FOCUS`: Lane 1 (property damage) is outside the claim-farming ban, needs no law firm, and is where the engine's deterministic banding is strongest. The injury firewall (IX-12) is the red line that keeps it clean of Lane 2 (CTP injury / claim-farming) exposure.
 
 ---
 

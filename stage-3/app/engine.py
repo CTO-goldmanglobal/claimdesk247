@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,11 @@ from typing import Any
 DATA_DIR = Path(__file__).parent / "data"
 
 VALID_BANDS = frozenset({"likely", "possible", "unclear", "insufficient"})
+
+# Personal-injury extension (spec §1.4): limitation-period safety buffer for
+# esc-limitation. ~2.5 years under the standard limitation period. Confirm the
+# exact period with Legal Head — this is a one-line change when confirmed.
+LIMITATION_BUFFER_YEARS = 2.5
 
 # Truthiness normalisation. YAML parses bare `yes`/`no` as Python True/False;
 # the engine should treat them consistently. The `injuries: none` value is
@@ -64,6 +70,60 @@ ACCIDENT_TYPE_TO_SCENARIO: dict[str, str] = {
     # Intake-clarity additions (v3.1.0)
     "parked_hit": "s11-parked-vehicle",   # user's parked car was struck
     "multi_vehicle": "s6-multi-chain",     # clear user-facing label for 3+ vehicles
+}
+
+# Public Liability hazard-type → scenario id (spec §2.1).
+PL_HAZARD_TYPE_TO_SCENARIO: dict[str, str] = {
+    "wet_surface": "pl1-slip-wet-surface",
+    "spill": "pl1-slip-wet-surface",
+    "rain_tracked": "pl1-slip-wet-surface",
+    "uneven_surface": "pl2-trip-uneven-surface",
+    "broken_pavement": "pl2-trip-uneven-surface",
+    "mat": "pl2-trip-uneven-surface",
+    "cabling": "pl2-trip-uneven-surface",
+    "step": "pl2-trip-uneven-surface",
+    "falling_object": "pl3-falling-object",
+    "stock": "pl3-falling-object",
+    "signage": "pl3-falling-object",
+    "inadequate_lighting": "pl4-inadequate-lighting",
+    "defective_premises": "pl5-defective-premises",
+    "broken_rail": "pl5-defective-premises",
+    "broken_stair": "pl5-defective-premises",
+    "fixture": "pl5-defective-premises",
+    "other_public_place": "pl6-other-public-place",
+}
+
+# Medical-negligence treatment-outcome → scenario id (spec §3.2). All scenarios
+# are escalation-dominant in v1; the map exists to structure the case file for
+# the lawyer, not to emit a band.
+MEDNEG_TREATMENT_TYPE_TO_SCENARIO: dict[str, str] = {
+    "surgical_outcome": "mn1-surgical-outcome",
+    "misdiagnosis_delay": "mn2-misdiagnosis-delay",
+    "medication_error": "mn3-medication-error",
+    "birth_injury": "mn4-birth-injury",
+    "cosmetic": "mn5-cosmetic-dental",
+    "dental": "mn5-cosmetic-dental",
+    "consent_not_informed": "mn6-consent-not-informed",
+    "other": "mn7-other",
+}
+
+# Property-damage (third-party motor, Lane 1) collision-type → scenario id.
+# The beachhead product per THIRD-PARTY-MOTOR-CLAIM-FOCUS-2026-07-05.md §3-4.
+# Same collision geometry as motor (s1-s11) but recovery-framed: outputs cite
+# Arsalan v Rixon for the like-for-like hire entitlement and the recovery is
+# from the at-fault driver's *comprehensive* insurer (not CTP). Outside the
+# NSW Claim Farming Practices Prohibition Act 2025 (injury only).
+PD_COLLISION_TYPE_TO_SCENARIO: dict[str, str] = {
+    "rear-end": "pd1-rear-end",
+    "T-intersection": "pd2-failure-to-give-way",
+    "give_way": "pd2-failure-to-give-way",
+    "reversing": "pd3-reversing",
+    "parked_hit": "pd4-parked-vehicle-struck",
+    "parking": "pd4-parked-vehicle-struck",
+    "sideswipe_same_direction": "pd5-changing-lanes-sideswipe",
+    "lane_change": "pd5-changing-lanes-sideswipe",
+    "car_park": "pd6-car-park",
+    "other": "pd7-other",
 }
 
 # Field-name normalisation. Test inputs use free-form keys; the scenarios use
@@ -144,16 +204,77 @@ class EngineResult:
         }
 
 
-# ----------------------------- Rule tree load ----------------------------- #
+# ----------------------------- Rule tree registry ----------------------------- #
+# Personal-injury extension (spec §1.2): the single motor tree becomes a
+# registry keyed by `claim_type`. Each tree carries its own hash and its own
+# legal_signoff, so a change to one tree never stales another tree's sign-off.
+# `claim_type` defaults to "motor" when absent, preserving backward compat with
+# every existing 99/99 motor test (which posts no claim_type).
+#
+# Backward-compat note: the Stage-3 acceptance tests monkey-patch
+# `_load_rule_tree` (the zero-arg cached motor loader) with patched loaders
+# that accept NO arguments. To keep those patches working, `_load_rule_tree`
+# remains zero-arg (returns the motor tree), and the typed lookup goes through
+# `_load_rule_tree_for(claim_type)` which the tests do not patch.
+
+DEFAULT_CLAIM_TYPE = "motor"
+
+RULE_TREE_REGISTRY: dict[str, str] = {
+    "motor": "rule-tree.nsw.v3.json",
+    "property_damage": "rule-tree.nsw.pd.v1.json",
+    "public_liability": "rule-tree.nsw.pl.v1.json",
+    "medical_negligence": "rule-tree.nsw.medneg.v1.json",
+}
+
+
+def _claim_type_for_scenario_id(scenario_id: str) -> str:
+    """Route a scenario id to its claim_type by prefix. Motor scenarios use
+    `sN-...`, PD uses `pdN-...`, PL uses `plN-...`, med-neg uses `mnN-...`."""
+    if scenario_id.startswith("pd"):
+        return "property_damage"
+    if scenario_id.startswith("pl"):
+        return "public_liability"
+    if scenario_id.startswith("mn"):
+        return "medical_negligence"
+    return "motor"
+
+
+@lru_cache(maxsize=8)
+def _load_rule_tree_typed(claim_type: str) -> dict[str, Any]:
+    """Load the rule tree for the given claim_type. Cached per claim_type.
+    This is the typed loader used by _load_rule_tree_for(); the tests patch
+    the public zero-arg _load_rule_tree (motor only), not this one."""
+    filename = RULE_TREE_REGISTRY.get(claim_type)
+    if filename is None:
+        raise KeyError(f"unknown claim_type: {claim_type!r}; "
+                       f"known: {sorted(RULE_TREE_REGISTRY)}")
+    with (DATA_DIR / filename).open() as f:
+        return json.load(f)
+
+
+def _load_rule_tree_for(claim_type: str) -> dict[str, Any]:
+    """Public typed lookup. Clears through the cache so test monkey-patches
+    on the motor loader are honored for motor while typed trees load fresh."""
+    if claim_type == DEFAULT_CLAIM_TYPE:
+        # Motor path: defer to the (possibly monkey-patched) zero-arg loader
+        # so sign-off / hash tests that patch _load_rule_tree keep working.
+        return _load_rule_tree()
+    return _load_rule_tree_typed(claim_type)
+
 
 @lru_cache(maxsize=1)
 def _load_rule_tree() -> dict[str, Any]:
+    """Load the MOTOR rule tree (zero-arg, cached). Retained as the canonical
+    motor loader that the acceptance tests monkey-patch for sign-off/hash
+    cases. For other claim types use _load_rule_tree_for(claim_type)."""
     with (DATA_DIR / "rule-tree.nsw.v3.json").open() as f:
         return json.load(f)
 
 
 def _scenario_by_id(scenario_id: str) -> dict[str, Any]:
-    for s in _load_rule_tree()["scenarios"]:
+    claim_type = _claim_type_for_scenario_id(scenario_id)
+    tree = _load_rule_tree_for(claim_type)
+    for s in tree["scenarios"]:
         if s["id"] == scenario_id:
             return s
     raise KeyError(f"unknown scenario id: {scenario_id}")
@@ -297,13 +418,40 @@ def _is_exception_positive(slot: str, value: Any) -> bool:
 # ----------------------- Scenario resolution ----------------------- #
 
 def _resolve_scenario(intake: dict[str, Any]) -> str | None:
-    """Map intake to scenario id. Returns None for non-NSW or other unmatchable."""
+    """Map intake to scenario id. Returns None for non-NSW or other unmatchable.
+
+    Personal-injury extension (spec §1.2): resolve `claim_type` first, then
+    resolve the scenario within that claim_type's tree. Motor is the default
+    when claim_type is absent (backward compat with all existing tests)."""
     if intake.get("state") and intake["state"] != "NSW":
         return None
-    acc = intake.get("accident_type")
-    if not acc:
-        return None
-    return ACCIDENT_TYPE_TO_SCENARIO.get(acc)
+    claim_type = intake.get("claim_type", DEFAULT_CLAIM_TYPE)
+
+    if claim_type == "motor":
+        acc = intake.get("accident_type")
+        if not acc:
+            return None
+        return ACCIDENT_TYPE_TO_SCENARIO.get(acc)
+
+    if claim_type == "property_damage":
+        col = intake.get("collision_type") or intake.get("accident_type")
+        if not col:
+            return None
+        return PD_COLLISION_TYPE_TO_SCENARIO.get(col)
+
+    if claim_type == "public_liability":
+        haz = intake.get("hazard_type")
+        if not haz:
+            return None
+        return PL_HAZARD_TYPE_TO_SCENARIO.get(haz)
+
+    if claim_type == "medical_negligence":
+        treat = intake.get("treatment_type")
+        if not treat:
+            return None
+        return MEDNEG_TREATMENT_TYPE_TO_SCENARIO.get(treat)
+
+    return None
 
 
 def _normalise_intake_for_scenario(intake: dict[str, Any], scenario_id: str) -> dict[str, Any]:
@@ -362,7 +510,164 @@ def _assign_band(scenario: dict[str, Any], intake: dict[str, Any],
         return _band_s10(intake, exceptions_fired)
     if sid == "s11-parked-vehicle":
         return _band_s11(intake, exceptions_fired)
+
+    # Personal Liability scenarios (spec §2.2) — draft bands for Legal Head sign.
+    if sid.startswith("pl"):
+        return _band_pl(sid, intake, exceptions_fired)
+
+    # Property-damage scenarios (Lane 1 beachhead) — recovery-framed bands.
+    # Same deterministic geometry as motor but framed for the at-fault
+    # insurer recovery (Arsalan v Rixon hire entitlement). Ships unsigned
+    # under CD-E4, so in practice every PD scenario escalates until signed.
+    if sid.startswith("pd"):
+        return _band_pd(sid, intake, exceptions_fired)
+
+    # Medical negligence scenarios (spec §3) — escalation-dominant. A substantive
+    # med-neg matter never returns a band from a questionnaire (s5O standard of
+    # care is expert-evidence territory). If execution reaches here, the
+    # scenario was signed AND no escalation fired — still resolve to "unclear"
+    # rather than emit a liability band. The hard test in tests/ asserts no
+    # med-neg scenario ever emits likely/possible.
+    if sid.startswith("mn"):
+        return "unclear"
+
     raise EngineBandError(f"no band logic for scenario: {sid}")
+
+
+def _band_pl(sid: str, intake: dict[str, Any], exc: list[str]) -> str:
+    """Public liability band (draft — Legal Head signs). Spec §2.2.
+
+    Three-level shape mirroring motor's enum: likely / possible / unclear.
+    (Spec prose says "unlikely"; that maps onto the valid "unclear" band since
+    VALID_BANDS is strictly likely|possible|unclear|insufficient.)
+    Escalation cases (pl6 catch-all, govt defendant, workplace, serious injury)
+    are routed earlier by global/scenario escalation checks, so by the time we
+    reach here the case is a clean occupier-liability question."""
+    if intake.get("incomplete") is True:
+        return "insufficient"
+    # pl6-other-public-place is a catch-all — should be routed to escalation
+    # before reaching here, but defensively band as unclear if it slips through.
+    if sid == "pl6-other-public-place":
+        return "unclear"
+
+    warned = is_positive(intake.get("hazard_warned"))
+    duration = intake.get("hazard_duration", "")
+    long_present = duration in ("long", "extended", "30min_plus", "30 min+")
+    claimant_reasonable = not is_positive(intake.get("claimant_at_fault"))
+
+    # likely: clear hazard, occupier on notice / long-present, no warning, claimant reasonable
+    if long_present and not warned and claimant_reasonable:
+        return "likely"
+    # possible: hazard present but warning given, or short duration, or contributory factors
+    return "possible"
+
+
+def _band_pd(sid: str, intake: dict[str, Any], exc: list[str]) -> str:
+    """Property-damage band (draft — Legal Head signs). Lane 1 beachhead
+    (Focus Study §4). Same deterministic collision geometry as motor (s1-s11)
+    but framed for recovery: the not-at-fault driver recovers repair + hire +
+    associated costs from the at-fault driver's comprehensive insurer under
+    Arsalan v Rixon [2021] HCA.
+
+    Band enum is the same likely|possible|unclear|insufficient. Inputs use the
+    pd-prefixed slot names (pd1-q1 etc.). Pre-checks (incomplete → insufficient;
+    fired flag_unclear exception → unclear; inconsistent damage → unclear) are
+    applied in _assign_band BEFORE this runs. pd7-other is a catch-all that
+    never bands above unclear."""
+    if intake.get("incomplete") is True:
+        return "insufficient"
+    if sid == "pd7-other":
+        return "unclear"
+
+    # pd1-rear-end — following driver responsible (RR126).
+    if sid == "pd1-rear-end":
+        pos = intake.get("user_position")
+        if pos == "behind":
+            # user is the following driver — not the recovery side
+            return "possible"
+        if pos in ("front", "middle_of_chain"):
+            # downgrade exceptions already handled pre-check; if we're here
+            # with no downgrade/unclear fired, the front vehicle recovers.
+            return "likely"
+        return "insufficient"
+
+    # pd2-failure-to-give-way (RR72/73)
+    if sid == "pd2-failure-to-give-way":
+        road = intake.get("user_road_type")
+        sight = intake.get("sight_lines")
+        if sight == "disputed":
+            return "unclear"
+        if sight == "obstructed":
+            return "possible"
+        if road == "through_road":
+            return "likely"
+        if road in ("terminating_road",):
+            # user was the one who should have given way
+            return "possible"
+        if road == "unsure":
+            return "unclear"
+        return "insufficient"
+
+    # pd3-reversing (RR96)
+    if sid == "pd3-reversing":
+        u = intake.get("user_action")
+        o = intake.get("other_vehicle_state") or intake.get("other_action")
+        if is_positive(intake.get("both_moving")):
+            return "unclear"
+        if u == "reversing":
+            return "possible"  # user reversing — not the recovery side
+        if u in ("stationary", "moving_forward", "parked") and o == "reversing":
+            return "likely"
+        return "unclear"
+
+    # pd4-parked-vehicle-struck
+    if sid == "pd4-parked-vehicle-struck":
+        motion = intake.get("pv_user_motion")
+        legal = intake.get("pv_parking_legal")
+        if motion == "moving":
+            return "unclear"
+        if legal == "unsure":
+            return "unclear"
+        if legal == "no" or "pd4-e1" in exc:
+            return "possible"
+        if motion in ("parked_stationary", "just_stopped") and legal == "yes":
+            return "likely"
+        return "unclear"
+
+    # pd5-changing-lanes-sideswipe (RR148)
+    if sid == "pd5-changing-lanes-sideswipe":
+        u = intake.get("ss_user_lane")
+        o = intake.get("ss_other_lane")
+        if not u or not o:
+            return "insufficient"
+        if u == "unsure" or o == "unsure":
+            return "unclear"
+        if u == "changing_lane" and o == "changing_lane":
+            return "unclear"
+        if u == "holding_lane" and o == "changing_lane":
+            return "likely"
+        if u == "changing_lane":
+            return "possible"
+        return "unclear"
+
+    # pd6-car-park manoeuvre
+    if sid == "pd6-car-park":
+        u = intake.get("cp_user_role")
+        o = intake.get("cp_other_role")
+        if not u or not o:
+            return "insufficient"
+        if is_positive(intake.get("cp_both_moving")):
+            return "unclear"
+        if "pd6-e1" in exc:
+            return "possible"  # aisle vehicle too fast (downgrade)
+        if u == "driving_in_aisle" and o in ("reversing_from_bay", "entering_bay"):
+            return "likely"
+        if u in ("reversing_from_bay", "entering_bay") and o == "driving_in_aisle":
+            return "possible"
+        return "unclear"
+
+    # Defensive: any other pd scenario we haven't authored band logic for.
+    return "unclear"
 
 
 def _band_s1(intake: dict[str, Any], exc: list[str], damage_consistent: bool) -> str:
@@ -542,10 +847,15 @@ def _band_s11(intake: dict[str, Any], exc: list[str]) -> str:
 # ----------------------- Global escalation triggers (Loop Request §6.4) ----------------------- #
 
 def _check_global_escalations(intake: dict[str, Any]) -> tuple[str, str] | None:
-    """Evaluate the 7 global escalation triggers. Returns (trigger_id, reason) or None.
+    """Evaluate the global escalation triggers (7 motor + 5 injury/PD-extension = 12).
+    Returns (trigger_id, reason) or None.
 
     These fire BEFORE scenario classification and short-circuit it. Spec requires
-    they be reachable from every intake state (G-19, G-20)."""
+    they be reachable from every intake state (G-19, G-20).
+
+    Triggers 8-11 (esc-serious-injury, esc-workers-comp, esc-govt-defendant,
+    esc-limitation) are gated by claim_type per spec §1.4. Trigger 12
+    (esc-uninsured-driver) applies to motor + property_damage."""
     # 1. esc-injury: any injury reported. (injuries: "none" is parsed as string
     # "none" and is therefore not positive.)
     inj = intake.get("injuries")
@@ -577,7 +887,98 @@ def _check_global_escalations(intake: dict[str, Any]) -> tuple[str, str] | None:
     # 7. esc-advice: user asks for legal advice directly
     if intake.get("user_asks"):
         return ("esc-advice", f"advice request: {intake.get('user_asks')!r}")
+
+    # ---- Personal-injury extension (spec §1.4): 4 new global triggers. ----
+    # These apply to the injury claim types (public_liability, medical_negligence)
+    # and some to motor. Gate each by claim_type applicability per the spec table.
+    claim_type = intake.get("claim_type", DEFAULT_CLAIM_TYPE)
+
+    # 8. esc-serious-injury: death, permanent impairment, or hospitalisation.
+    # Applies to ALL claim types (motor, PL, med-neg). High-stakes — never band.
+    harm = intake.get("harm_severity")
+    if harm in ("death", "permanent_impairment", "hospitalised"):
+        return ("esc-serious-injury", f"serious injury / high harm: {harm}")
+    if is_positive(intake.get("death_reported")):
+        return ("esc-serious-injury", "death reported")
+
+    # 9. esc-workers-comp: injury happened at work / in the course of employment.
+    # Routes to the workers-comp scheme, not civil liability. Applies to PL and
+    # med-neg (a workplace motor accident stays motor but flags work-cover).
+    if claim_type in ("public_liability", "medical_negligence") and is_positive(intake.get("at_work")):
+        return ("esc-workers-comp", "injury occurred in the course of employment")
+
+    # 10. esc-govt-defendant: defendant is a public authority / council / hospital.
+    # Special notice & procedural rules apply. Applies to PL and med-neg.
+    if claim_type in ("public_liability", "medical_negligence"):
+        defendant = intake.get("defendant_type")
+        if defendant in ("council", "public_authority", "government", "public_hospital"):
+            return ("esc-govt-defendant", f"government/public defendant: {defendant}")
+
+    # 11. esc-limitation: incident date > LIMITATION_BUFFER_YEARS ago.
+    # Applies to PL and med-neg (limitation differs from motor CTP). Buffer
+    # keeps a margin under the standard limitation period.
+    if claim_type in ("public_liability", "medical_negligence"):
+        lim = _check_limitation(intake)
+        if lim is not None:
+            return lim
+
+    # 12. esc-uninsured-driver (PD / motor): at-fault driver uninsured or
+    # identity unknown (hit-and-run without a plate is already esc-hitrun;
+    # this catches the "we know who but they have no cover" case). For PD,
+    # the recovery shifts to the user's own insurer (uninsured-motorist
+    # extension / property damage cover) — different matter handling.
+    if claim_type in ("property_damage", "motor") and is_positive(intake.get("at_fault_uninsured")):
+        return ("esc-uninsured-driver", "at-fault driver uninsured or cover unknown")
+
     return None
+
+
+def _check_limitation(intake: dict[str, Any]) -> tuple[str, str] | None:
+    """Return (esc-limitation, reason) if the incident date is older than
+    LIMITATION_BUFFER_YEARS, else None. Tolerates ISO date, ISO datetime, and
+    dd/mm/yyyy; anything unparseable is skipped (no false escalation)."""
+    raw = intake.get("incident_date") or intake.get("datetime_location")
+    if not raw or not isinstance(raw, str):
+        return None
+    parsed = _parse_incident_date(raw)
+    if parsed is None:
+        return None
+    now = datetime.now(timezone.utc)
+    age_years = (now - parsed).total_seconds() / (365.25 * 24 * 3600)
+    if age_years > LIMITATION_BUFFER_YEARS:
+        return ("esc-limitation", f"incident {age_years:.1f} yrs old > {LIMITATION_BUFFER_YEARS} yr buffer")
+    return None
+
+
+def _parse_incident_date(raw: str) -> datetime | None:
+    """Best-effort parse of a date string. Returns timezone-aware datetime or None."""
+    raw = raw.strip()
+    candidates = (
+        # ISO 8601 (with or without time / timezone)
+        ("%Y-%m-%dT%H:%M:%S%z", raw),
+        ("%Y-%m-%dT%H:%M:%S", raw),
+        ("%Y-%m-%d %H:%M:%S", raw),
+        ("%Y-%m-%d", raw),
+        # AU common forms
+        ("%d/%m/%Y", raw),
+        ("%d/%m/%Y %H:%M", raw),
+    )
+    for fmt, s in candidates:
+        try:
+            dt = datetime.strptime(s, fmt)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except ValueError:
+            continue
+    # Final fallback: fromisoformat (handles some ISO variants the above miss)
+    try:
+        dt = datetime.fromisoformat(raw)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        return None
 
 
 # ----------------------- Scenario-level escalation overrides ----------------------- #
@@ -615,7 +1016,9 @@ def classify(intake: dict[str, Any]) -> EngineResult:
     """Pure fault engine. No I/O. Returns EngineResult.
 
     Order of evaluation (per Stage 1 spec):
-    1. Global escalation triggers (injury, hitrun, vulnerable, fraud, dispute, multiparty, advice)
+    1. Global escalation triggers (injury, hitrun, vulnerable, fraud, dispute,
+       multiparty, advice + the 4 injury-extension triggers: serious-injury,
+       workers-comp, govt-defendant, limitation + esc-uninsured-driver)
     2. State-scope guard (non-NSW)
     3. Scenario-level escalation overrides (e.g. s6 chain_count >= 3)
     4. Exception probes
@@ -661,7 +1064,13 @@ def classify(intake: dict[str, Any]) -> EngineResult:
     # A scenario without a matching sign-off never returns a band — it escalates.
     # The current_hash binds the sign-off to the scenario's logical content; any
     # change to the scenario's body invalidates the existing sign-off.
-    current_hash = _compute_scenarios_hash(_load_rule_tree())
+    #
+    # Personal-injury extension (spec §1.5): the hash is computed PER TREE for
+    # the claim_type that owns this scenario. Mutating the PL tree does not
+    # stale the motor sign-off, and vice versa.
+    scenario_claim_type = _claim_type_for_scenario_id(scenario_id)
+    resolved_tree = _load_rule_tree_for(scenario_claim_type)
+    current_hash = _compute_scenarios_hash(resolved_tree)
     signoff_ok, signoff_reason = _check_legal_signoff(scenario, current_hash)
     if not signoff_ok:
         return EngineResult(

@@ -42,7 +42,18 @@ class Session:
 
 
 # Slot definitions (from spec/conversation-flow.v1.md §2, order fixed)
-SLOT_DEFINITIONS: list[dict[str, Any]] = [
+#
+# Personal-injury extension (spec §1.3): the flat 14-slot motor list is now the
+# MOTOR branch of a slot registry keyed by claim_type. Motor ids 1-14 are
+# UNCHANGED so every existing acceptance test (which posts motor slot ids)
+# keeps passing. PL and med-neg get their own id ranges that do not collide
+# with motor.
+#
+# A `claim_type` slot is collected early (after consent/state). When the
+# customer picks motor, the motor branch runs as before. When they pick PL or
+# med-neg, the matching branch's slots run instead. The injuries check
+# (G-19/G-20) stays reachable from any state.
+MOTOR_SLOTS: list[dict[str, Any]] = [
     {"id": 1, "slot": "state_of_accident", "type": "enum", "options": ["NSW", "outside_nsw"], "mandatory": True},
     {"id": 2, "slot": "datetime_location", "type": "text", "mandatory": True},
     {"id": 3, "slot": "accident_type", "type": "enum", "options": ["rear-end", "T-intersection", "roundabout", "merge", "reversing", "car_park", "parked_hit", "intersection_signalised", "turning_right", "sideswipe_same_direction", "multi_vehicle", "not_listed"], "mandatory": True},
@@ -58,6 +69,116 @@ SLOT_DEFINITIONS: list[dict[str, Any]] = [
     {"id": 13, "slot": "other_driver_details", "type": "text", "mandatory": False},
     {"id": 14, "slot": "injuries", "type": "enum", "options": ["none", "minor", "serious"], "mandatory": True},
 ]
+
+# Backward-compat alias: existing callers reference SLOT_DEFINITIONS directly.
+# This is the ENGINE-CONTRACT motor list (14 slots, ids 1-14, NO claim_type
+# question). Acceptance tests that post slot ids 1-14 use this.
+SLOT_DEFINITIONS: list[dict[str, Any]] = MOTOR_SLOTS
+
+# Shared slot collected after state, before the branch. Id 100 keeps it out of
+# the motor 1-14 range and the PL/med-neg ranges below.
+CLAIM_TYPE_SLOT: dict[str, Any] = {
+    "id": 100,
+    "slot": "claim_type",
+    "type": "enum",
+    "options": ["motor", "property_damage", "public_liability", "medical_negligence"],
+    "mandatory": True,
+}
+
+# Frontend motor list: inserts the claim_type question right after state so a
+# new customer is offered the four claim-type branches (spec §1.3 step 3).
+# The engine-contract MOTOR_SLOTS above is UNCHANGED so acceptance tests that
+# post ids 1-14 keep passing.
+FRONTEND_MOTOR_SLOTS: list[dict[str, Any]] = [
+    MOTOR_SLOTS[0],          # id 1: state_of_accident
+    CLAIM_TYPE_SLOT,         # id 100: claim_type (NEW)
+    *MOTOR_SLOTS[1:],        # ids 2-14: the rest of the motor flow
+]
+
+# Property-damage (third-party motor, Lane 1 beachhead) branch. Ids 400-414.
+# Same collision geometry as motor but recovery-framed: the at-fault driver's
+# comprehensive insurer pays, with Arsalan v Rixon hire entitlement. The damage
+# map (motor slot 7) IS shown for PD (it's a motor collision). Injuries shared
+# (collected at end; any injury → esc-injury → PI pathway, hard firewall).
+PD_SLOTS: list[dict[str, Any]] = [
+    {"id": 1, "slot": "state_of_accident", "type": "enum", "options": ["NSW", "outside_nsw"], "mandatory": True},
+    {"id": 100, "slot": "claim_type", "type": "enum", "options": ["motor", "property_damage", "public_liability", "medical_negligence"], "mandatory": True},
+    {"id": 400, "slot": "collision_type", "type": "enum", "options": ["rear-end", "T-intersection", "give_way", "reversing", "parked_hit", "parking", "sideswipe_same_direction", "lane_change", "car_park", "other"], "mandatory": True},
+    {"id": 401, "slot": "incident_date", "type": "text", "mandatory": True},
+    {"id": 402, "slot": "user_vehicle", "type": "text", "mandatory": True},
+    {"id": 403, "slot": "other_vehicles", "type": "text", "mandatory": True},
+    {"id": 404, "slot": "movement_description", "type": "text", "mandatory": True},
+    {"id": 405, "slot": "damage_locations", "type": "multienum", "options": ["front", "rear", "left", "right", "multiple"], "mandatory": True},
+    {"id": 406, "slot": "police_attendance", "type": "enum", "options": ["yes", "no", "unsure"], "mandatory": True},
+    {"id": 407, "slot": "police_event_number", "type": "text", "mandatory": False},
+    {"id": 408, "slot": "witnesses", "type": "text", "mandatory": False},
+    {"id": 409, "slot": "dashcam", "type": "enum", "options": ["yours", "theirs", "neither", "unsure"], "mandatory": False},
+    {"id": 410, "slot": "photos_taken", "type": "enum", "options": ["yes", "no"], "mandatory": False},
+    {"id": 411, "slot": "other_driver_details", "type": "text", "mandatory": True},
+    {"id": 412, "slot": "at_fault_uninsured", "type": "enum", "options": ["yes", "no", "unsure"], "mandatory": True},
+    {"id": 413, "slot": "repairer_quote", "type": "text", "mandatory": False},
+    {"id": 414, "slot": "vehicle_class", "type": "enum", "options": ["small", "sedan", "suv_4wd", "ute_van", "prestige_luxury", "commercial_heavy", "unsure"], "mandatory": False},
+    {"id": 415, "slot": "hire_need", "type": "enum", "options": ["yes_needed", "no_not_needed", "unsure"], "mandatory": False},
+    {"id": 416, "slot": "injuries", "type": "enum", "options": ["none", "minor", "serious"], "mandatory": True},
+]
+
+# Public Liability branch (spec §2.1). Ids 200-209. The damage map (motor slot
+# 7) is NOT shown for PL. Injuries is shared (collected at the end).
+PL_SLOTS: list[dict[str, Any]] = [
+    {"id": 1, "slot": "state_of_accident", "type": "enum", "options": ["NSW", "outside_nsw"], "mandatory": True},
+    {"id": 100, "slot": "claim_type", "type": "enum", "options": ["motor", "public_liability", "medical_negligence"], "mandatory": True},
+    {"id": 200, "slot": "incident_date", "type": "text", "mandatory": True},
+    {"id": 201, "slot": "pl_location", "type": "enum", "options": ["supermarket", "shopping_centre", "footpath_council", "private_premises", "workplace", "construction_site", "rental_property", "commercial_premises", "stairwell", "car_park", "corridor", "other"], "mandatory": True},
+    {"id": 202, "slot": "hazard_type", "type": "enum", "options": ["wet_surface", "spill", "rain_tracked", "cleaning", "uneven_surface", "broken_pavement", "mat", "cabling", "step", "pothole", "falling_object", "stock", "signage", "inadequate_lighting", "defective_premises", "broken_rail", "broken_stair", "fixture", "other_public_place", "other"], "mandatory": True},
+    {"id": 203, "slot": "hazard_warned", "type": "enum", "options": ["yes", "no", "unsure"], "mandatory": True},
+    {"id": 204, "slot": "hazard_duration", "type": "enum", "options": ["just_happened", "short", "long", "extended", "30min_plus", "unsure"], "mandatory": True},
+    {"id": 205, "slot": "claimant_activity", "type": "enum", "options": ["walking_normally", "rushing", "carrying_items", "on_phone", "browsing", "working", "other"], "mandatory": False},
+    {"id": 206, "slot": "defendant_type", "type": "enum", "options": ["private_occupier", "council", "public_authority", "government", "business", "unknown"], "mandatory": False},
+    {"id": 207, "slot": "at_work", "type": "enum", "options": ["yes", "no", "unsure"], "mandatory": False},
+    {"id": 208, "slot": "harm_severity", "type": "enum", "options": ["none", "minor", "serious", "permanent_impairment", "death"], "mandatory": True},
+    {"id": 209, "slot": "injuries", "type": "enum", "options": ["none", "minor", "serious"], "mandatory": True},
+]
+
+# Medical Negligence branch (spec §3.1). Ids 300-309. Escalation-dominant: the
+# slots exist to structure the case file for the lawyer, not to band.
+MEDNEG_SLOTS: list[dict[str, Any]] = [
+    {"id": 1, "slot": "state_of_accident", "type": "enum", "options": ["NSW", "outside_nsw"], "mandatory": True},
+    {"id": 100, "slot": "claim_type", "type": "enum", "options": ["motor", "public_liability", "medical_negligence"], "mandatory": True},
+    {"id": 300, "slot": "provider_type", "type": "enum", "options": ["gp", "hospital", "specialist", "surgeon", "dentist", "cosmetic", "pharmacy", "birth_centre", "other"], "mandatory": True},
+    {"id": 301, "slot": "provider_public_private", "type": "enum", "options": ["public", "private", "unsure"], "mandatory": False},
+    {"id": 302, "slot": "treatment_type", "type": "enum", "options": ["surgical_outcome", "misdiagnosis_delay", "medication_error", "birth_injury", "cosmetic", "dental", "consent_not_informed", "other"], "mandatory": True},
+    {"id": 303, "slot": "incident_date", "type": "text", "mandatory": True},
+    {"id": 304, "slot": "harm_severity", "type": "enum", "options": ["none", "minor", "serious", "permanent_impairment", "death"], "mandatory": True},
+    {"id": 305, "slot": "outcome_nature", "type": "enum", "options": ["unexpected_outcome", "suspected_error", "not_sure", "communication_only"], "mandatory": True},
+    {"id": 306, "slot": "second_opinion", "type": "enum", "options": ["yes", "no", "not_yet"], "mandatory": False},
+    {"id": 307, "slot": "at_work", "type": "enum", "options": ["yes", "no", "unsure"], "mandatory": False},
+    {"id": 308, "slot": "multiple_providers", "type": "enum", "options": ["yes", "no", "unsure"], "mandatory": False},
+    {"id": 309, "slot": "injuries", "type": "enum", "options": ["none", "minor", "serious"], "mandatory": True},
+]
+
+# Registry of branch slot lists. Motor is the default (backward compat).
+BRANCH_SLOTS: dict[str, list[dict[str, Any]]] = {
+    "motor": MOTOR_SLOTS,
+    "property_damage": PD_SLOTS,
+    "public_liability": PL_SLOTS,
+    "medical_negligence": MEDNEG_SLOTS,
+}
+
+DEFAULT_BRANCH = "motor"
+
+
+def _active_slots(intake: dict[str, Any], frontend: bool = False) -> list[dict[str, Any]]:
+    """Return the slot list for the session's resolved claim_type. Defaults to
+    motor when claim_type is absent (preserves the legacy 14-slot motor flow).
+
+    When `frontend=True`, the motor branch uses FRONTEND_MOTOR_SLOTS (which
+    inserts the claim_type question after state) so a new web customer is
+    offered the three personal-injury branches. The engine-contract path
+    (acceptance tests posting ids 1-14) uses the plain MOTOR_SLOTS."""
+    ct = intake.get("claim_type", DEFAULT_BRANCH)
+    if ct == "motor" and frontend:
+        return FRONTEND_MOTOR_SLOTS
+    return BRANCH_SLOTS.get(ct, MOTOR_SLOTS)
 
 REPROMPT_CAP = 2  # G-26
 
@@ -87,11 +208,35 @@ def _validate_slot(slot_def: dict[str, Any], value: Any) -> tuple[bool, str | No
 
 
 def _next_slot_index(intake: dict[str, Any]) -> int:
-    """Return the index of the next slot that still needs a value (or is invalid)."""
-    for i, slot_def in enumerate(SLOT_DEFINITIONS):
+    """Return the index of the next slot that still needs a value (or is invalid).
+
+    Uses the session's resolved branch slot list (motor by default)."""
+    slots = _active_slots(intake)
+    for i, slot_def in enumerate(slots):
         if slot_def["mandatory"] and not intake.get(slot_def["slot"]):
             return i
-    return len(SLOT_DEFINITIONS)  # all mandatory done
+    return len(slots)  # all mandatory done
+
+
+def _find_slot_def(slot_id: int, intake: dict[str, Any]) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    """Find a slot def by id within the active branch. Returns (slot_def, branch).
+    The claim_type slot (id 100) is always resolvable since it's in every branch
+    except the legacy motor list — so we also check CLAIM_TYPE_SLOT and the
+    motor list explicitly for backward compat."""
+    # Claim-type slot is special: it can be submitted before a branch is chosen.
+    if slot_id == CLAIM_TYPE_SLOT["id"]:
+        return CLAIM_TYPE_SLOT, _active_slots(intake)
+    # Look in the active branch first.
+    branch = _active_slots(intake)
+    for sd in branch:
+        if sd["id"] == slot_id:
+            return sd, branch
+    # Backward-compat fallback: motor slot ids 1-14 submitted before claim_type
+    # is set resolve against the motor list.
+    for sd in MOTOR_SLOTS:
+        if sd["id"] == slot_id:
+            return sd, MOTOR_SLOTS
+    return None, branch
 
 
 def new_session() -> Session:
@@ -118,7 +263,10 @@ def submit_slot(session: Session, slot_id: int, value: Any) -> dict[str, Any]:
     if not session.consent:
         return {"error": "consent required before PII", "end_state": "S0a-CONSENT"}
 
-    slot_def = SLOT_DEFINITIONS[slot_id - 1]  # slot_id is 1-based, list is 0-indexed
+    slot_def, branch = _find_slot_def(slot_id, session.intake)
+    if slot_def is None:
+        return {"error": f"unknown slot id: {slot_id} for claim_type "
+                         f"{session.intake.get('claim_type', DEFAULT_BRANCH)}"}
     valid, err = _validate_slot(slot_def, value)
     if not valid:
         # Increment re-prompt count; if at cap, offer callback (T-2-030)
@@ -173,13 +321,16 @@ def submit_slot(session: Session, slot_id: int, value: Any) -> dict[str, Any]:
         return {"escalation": "callback", "unmapped_accident_type": True,
                 "end_state": "SX-ESCALATE", "reference": session.reference}
 
-    # Move to next slot
+    # Move to next slot (within the active branch)
+    branch = _active_slots(session.intake)
     next_idx = _next_slot_index(session.intake)
-    if next_idx >= len(SLOT_DEFINITIONS):
+    if next_idx >= len(branch):
         session.state = "S4-CLASSIFY"
+        next_slot_id = None
     else:
-        session.state = f"S3-SLOT{next_idx+1}"
-    return {"slot_accepted": True, "next_state": session.state, "next_slot_id": next_idx + 1 if next_idx < len(SLOT_DEFINITIONS) else None}
+        session.state = f"S3-SLOT{branch[next_idx]['id']}"
+        next_slot_id = branch[next_idx]["id"]
+    return {"slot_accepted": True, "next_state": session.state, "next_slot_id": next_slot_id}
 
 
 def run_classification(session: Session) -> EngineResult:
