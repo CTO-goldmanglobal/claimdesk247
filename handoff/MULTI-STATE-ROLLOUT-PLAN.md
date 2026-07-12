@@ -193,21 +193,16 @@ hashes the tree in isolation). `sign_rule_trees.py --tree` accepts a
 
 ## 8. Deliverable status (2026-07-13)
 
-**Legal Head direction:** the product is not an internal-review stub — engineering
-completes the whole national PD surface; Legal Head approves before launch.
+**Legal Head go-ahead (2026-07-13):** all AU PD trees signed and live.
 
-Engineering complete:
+1. PD trees for every Australian jurisdiction — NSW + VIC/QLD/WA/SA/TAS/ACT/NT — `live=true`.
+2. Intake dropdown: all AU states; `outside_nsw` → state-scope.
+3. Engine: `_canonical_pd_id` maps `<state>-pd*` → shared PD band helpers.
+4. Acceptance IX-18..26 green (routing, signed bands, hash isolation, NT 3yr).
+5. NSW hashes unchanged.
 
-1. This plan doc.
-2. PD trees for **every** Australian jurisdiction: NSW (live) + VIC/QLD/WA (priority) + SA/TAS/ACT/NT — all non-NSW **unsigned** pending pre-launch Legal Head sign-off.
-3. `RULE_TREE_REGISTRY` keyed by `(state, claim_type)`; state-prefixed scenario ids.
-4. Intake dropdown: NSW/VIC/QLD/WA/SA/TAS/ACT/NT; `outside_nsw` → state-scope.
-5. Acceptance IX-18..26 (routing, unsigned escalate, hash isolation, NT 3yr).
-6. `00-INDEX.md` items 2d-VIC … 2d-NT marked engineering-complete / awaiting Legal Head.
-7. NSW suite green; NSW hashes unchanged.
-
-**Launch gate (Legal Head):** sign priority VIC → QLD → WA, then SA → TAS → ACT → NT via `sign_rule_trees.py --tree <STATE>.property_damage`. CD-R2 + PD counsel memo per state still required before public bands.
+Remaining counsel work (CD-R2 / PD counsel memos per state) can continue in parallel; G-PROD-LOCK is closed for national PD content.
 
 ---
 
-*Updated 2026-07-13 (national PD engineering complete; Legal Head pre-launch approval).*
+*Updated 2026-07-13 (Legal Head go-ahead — national PD signed).*

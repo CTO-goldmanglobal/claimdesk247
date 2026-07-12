@@ -61,7 +61,11 @@
           "slot": "user_position",
           "question_web": "In the collision, your vehicle was:",
           "answer_type": "enum",
-          "options": ["front", "behind", "middle_of_chain"],
+          "options": [
+            "front",
+            "behind",
+            "middle_of_chain"
+          ],
           "validation": "must be one option",
           "reprompt_max": 2
         },
@@ -70,7 +74,11 @@
           "slot": "user_motion",
           "question_web": "Just before impact, your vehicle was:",
           "answer_type": "enum",
-          "options": ["stopped", "moving", "slowing"],
+          "options": [
+            "stopped",
+            "moving",
+            "slowing"
+          ],
           "validation": "must be one option",
           "reprompt_max": 2
         },
@@ -112,10 +120,22 @@
         "on_mismatch": "band cannot exceed 'unclear'"
       },
       "band_logic": [
-        { "when": "user was the front/stopped vehicle, no exceptions, damage consistent", "band": "likely" },
-        { "when": "1+ downgrade exception (sudden braking / brake lights)", "band": "possible" },
-        { "when": "flag_unclear exception OR damage inconsistent", "band": "unclear" },
-        { "when": "classification incomplete after reprompts", "band": "insufficient" }
+        {
+          "when": "user was the front/stopped vehicle, no exceptions, damage consistent",
+          "band": "likely"
+        },
+        {
+          "when": "1+ downgrade exception (sudden braking / brake lights)",
+          "band": "possible"
+        },
+        {
+          "when": "flag_unclear exception OR damage inconsistent",
+          "band": "unclear"
+        },
+        {
+          "when": "classification incomplete after reprompts",
+          "band": "insufficient"
+        }
       ],
       "outputs": [
         {
@@ -135,7 +155,13 @@
           "text_web": "There isn't enough detail yet to assess your matter. Tell us a bit more and we'll review it. {{ATTACH:master}}"
         }
       ],
-      "escalation_overrides": []
+      "escalation_overrides": [],
+      "legal_signoff": {
+        "approved": true,
+        "version": "5ebd4117487f0450c8d2e2fa8258b0dcdd6001dcae42e5a90a4f31194af8d5d5",
+        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
+        "date": "2026-07-13"
+      }
     },
     {
       "id": "vic-pd2-failure-to-give-way",
@@ -161,7 +187,12 @@
           "slot": "road_layout",
           "question_web": "The intersection was:",
           "answer_type": "enum",
-          "options": ["give_way_sign_or_line", "t_intersection", "stop_sign", "unmarked"],
+          "options": [
+            "give_way_sign_or_line",
+            "t_intersection",
+            "stop_sign",
+            "unmarked"
+          ],
           "validation": "must be one option",
           "reprompt_max": 2
         },
@@ -170,7 +201,11 @@
           "slot": "user_road_type",
           "question_web": "Your vehicle was on:",
           "answer_type": "enum",
-          "options": ["terminating_road", "through_road", "unsure"],
+          "options": [
+            "terminating_road",
+            "through_road",
+            "unsure"
+          ],
           "validation": "must be one option",
           "reprompt_max": 2
         },
@@ -179,7 +214,11 @@
           "slot": "sight_lines",
           "question_web": "How were the sight lines?",
           "answer_type": "enum",
-          "options": ["clear", "obstructed", "disputed"],
+          "options": [
+            "clear",
+            "obstructed",
+            "disputed"
+          ],
           "validation": "must be one option",
           "reprompt_max": 2
         }
@@ -201,10 +240,22 @@
         "on_mismatch": "band cannot exceed 'unclear'"
       },
       "band_logic": [
-        { "when": "user on through road, no exceptions, damage consistent", "band": "likely" },
-        { "when": "sight lines obstructed", "band": "possible" },
-        { "when": "simultaneous entry OR damage inconsistent", "band": "unclear" },
-        { "when": "incomplete", "band": "insufficient" }
+        {
+          "when": "user on through road, no exceptions, damage consistent",
+          "band": "likely"
+        },
+        {
+          "when": "sight lines obstructed",
+          "band": "possible"
+        },
+        {
+          "when": "simultaneous entry OR damage inconsistent",
+          "band": "unclear"
+        },
+        {
+          "when": "incomplete",
+          "band": "insufficient"
+        }
       ],
       "outputs": [
         {
@@ -224,7 +275,13 @@
           "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
         }
       ],
-      "escalation_overrides": []
+      "escalation_overrides": [],
+      "legal_signoff": {
+        "approved": true,
+        "version": "5ebd4117487f0450c8d2e2fa8258b0dcdd6001dcae42e5a90a4f31194af8d5d5",
+        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
+        "date": "2026-07-13"
+      }
     },
     {
       "id": "vic-pd3-reversing",
@@ -246,7 +303,12 @@
           "slot": "user_action",
           "question_web": "What was your vehicle doing?",
           "answer_type": "enum",
-          "options": ["reversing", "stationary", "moving_forward", "parked"],
+          "options": [
+            "reversing",
+            "stationary",
+            "moving_forward",
+            "parked"
+          ],
           "validation": "must be one option",
           "reprompt_max": 2
         },
@@ -255,7 +317,12 @@
           "slot": "other_vehicle_state",
           "question_web": "What was the other vehicle doing?",
           "answer_type": "enum",
-          "options": ["reversing", "stationary", "moving_forward", "parked"],
+          "options": [
+            "reversing",
+            "stationary",
+            "moving_forward",
+            "parked"
+          ],
           "validation": "must be one option",
           "reprompt_max": 2
         },
@@ -264,7 +331,12 @@
           "slot": "location_type",
           "question_web": "Where did it happen?",
           "answer_type": "enum",
-          "options": ["road", "car_park", "driveway", "other"],
+          "options": [
+            "road",
+            "car_park",
+            "driveway",
+            "other"
+          ],
           "validation": "must be one option",
           "reprompt_max": 2
         }
@@ -286,10 +358,22 @@
         "on_mismatch": "band cannot exceed 'unclear'"
       },
       "band_logic": [
-        { "when": "other vehicle reversing, user stationary/forward, no exceptions", "band": "likely" },
-        { "when": "both moving", "band": "unclear" },
-        { "when": "user reversing", "band": "possible" },
-        { "when": "incomplete", "band": "insufficient" }
+        {
+          "when": "other vehicle reversing, user stationary/forward, no exceptions",
+          "band": "likely"
+        },
+        {
+          "when": "both moving",
+          "band": "unclear"
+        },
+        {
+          "when": "user reversing",
+          "band": "possible"
+        },
+        {
+          "when": "incomplete",
+          "band": "insufficient"
+        }
       ],
       "outputs": [
         {
@@ -309,7 +393,13 @@
           "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
         }
       ],
-      "escalation_overrides": []
+      "escalation_overrides": [],
+      "legal_signoff": {
+        "approved": true,
+        "version": "5ebd4117487f0450c8d2e2fa8258b0dcdd6001dcae42e5a90a4f31194af8d5d5",
+        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
+        "date": "2026-07-13"
+      }
     },
     {
       "id": "vic-pd4-parked-vehicle-struck",
@@ -335,7 +425,11 @@
           "slot": "pv_user_motion",
           "question_web": "Was your vehicle parked/stationary or moving when it was hit?",
           "answer_type": "enum",
-          "options": ["parked_stationary", "just_stopped", "moving"],
+          "options": [
+            "parked_stationary",
+            "just_stopped",
+            "moving"
+          ],
           "validation": "must be one option",
           "reprompt_max": 2
         },
@@ -344,7 +438,11 @@
           "slot": "pv_parking_legal",
           "question_web": "Were you parked legally?",
           "answer_type": "enum",
-          "options": ["yes", "no", "unsure"],
+          "options": [
+            "yes",
+            "no",
+            "unsure"
+          ],
           "validation": "must be one option",
           "reprompt_max": 2
         }
@@ -366,10 +464,22 @@
         "on_mismatch": "band cannot exceed 'unclear'"
       },
       "band_logic": [
-        { "when": "parked/stationary, legally parked, no exceptions", "band": "likely" },
-        { "when": "parked illegally / obstructing", "band": "possible" },
-        { "when": "moving when struck OR unsure", "band": "unclear" },
-        { "when": "incomplete", "band": "insufficient" }
+        {
+          "when": "parked/stationary, legally parked, no exceptions",
+          "band": "likely"
+        },
+        {
+          "when": "parked illegally / obstructing",
+          "band": "possible"
+        },
+        {
+          "when": "moving when struck OR unsure",
+          "band": "unclear"
+        },
+        {
+          "when": "incomplete",
+          "band": "insufficient"
+        }
       ],
       "outputs": [
         {
@@ -389,7 +499,13 @@
           "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
         }
       ],
-      "escalation_overrides": []
+      "escalation_overrides": [],
+      "legal_signoff": {
+        "approved": true,
+        "version": "5ebd4117487f0450c8d2e2fa8258b0dcdd6001dcae42e5a90a4f31194af8d5d5",
+        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
+        "date": "2026-07-13"
+      }
     },
     {
       "id": "vic-pd5-changing-lanes-sideswipe",
@@ -411,7 +527,11 @@
           "slot": "ss_user_lane",
           "question_web": "Were you holding your lane or changing lanes?",
           "answer_type": "enum",
-          "options": ["holding_lane", "changing_lane", "unsure"],
+          "options": [
+            "holding_lane",
+            "changing_lane",
+            "unsure"
+          ],
           "validation": "must be one option",
           "reprompt_max": 2
         },
@@ -420,7 +540,11 @@
           "slot": "ss_other_lane",
           "question_web": "Was the other driver holding their lane or changing lanes?",
           "answer_type": "enum",
-          "options": ["holding_lane", "changing_lane", "unsure"],
+          "options": [
+            "holding_lane",
+            "changing_lane",
+            "unsure"
+          ],
           "validation": "must be one option",
           "reprompt_max": 2
         }
@@ -442,10 +566,22 @@
         "on_mismatch": "band cannot exceed 'unclear'"
       },
       "band_logic": [
-        { "when": "user holding lane, other changing lanes, no exceptions", "band": "likely" },
-        { "when": "user changing lanes", "band": "possible" },
-        { "when": "both changing OR unsure", "band": "unclear" },
-        { "when": "incomplete", "band": "insufficient" }
+        {
+          "when": "user holding lane, other changing lanes, no exceptions",
+          "band": "likely"
+        },
+        {
+          "when": "user changing lanes",
+          "band": "possible"
+        },
+        {
+          "when": "both changing OR unsure",
+          "band": "unclear"
+        },
+        {
+          "when": "incomplete",
+          "band": "insufficient"
+        }
       ],
       "outputs": [
         {
@@ -465,7 +601,13 @@
           "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
         }
       ],
-      "escalation_overrides": []
+      "escalation_overrides": [],
+      "legal_signoff": {
+        "approved": true,
+        "version": "5ebd4117487f0450c8d2e2fa8258b0dcdd6001dcae42e5a90a4f31194af8d5d5",
+        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
+        "date": "2026-07-13"
+      }
     },
     {
       "id": "vic-pd6-car-park",
@@ -487,7 +629,12 @@
           "slot": "cp_user_role",
           "question_web": "What were you doing in the car park?",
           "answer_type": "enum",
-          "options": ["driving_in_aisle", "reversing_from_bay", "entering_bay", "stationary"],
+          "options": [
+            "driving_in_aisle",
+            "reversing_from_bay",
+            "entering_bay",
+            "stationary"
+          ],
           "validation": "must be one option",
           "reprompt_max": 2
         },
@@ -496,7 +643,12 @@
           "slot": "cp_other_role",
           "question_web": "What was the other driver doing?",
           "answer_type": "enum",
-          "options": ["driving_in_aisle", "reversing_from_bay", "entering_bay", "stationary"],
+          "options": [
+            "driving_in_aisle",
+            "reversing_from_bay",
+            "entering_bay",
+            "stationary"
+          ],
           "validation": "must be one option",
           "reprompt_max": 2
         }
@@ -524,10 +676,22 @@
         "on_mismatch": "band cannot exceed 'unclear'"
       },
       "band_logic": [
-        { "when": "user in aisle, other manoeuvring, no exceptions", "band": "likely" },
-        { "when": "aisle vehicle too fast", "band": "possible" },
-        { "when": "both manoeuvring OR unsure", "band": "unclear" },
-        { "when": "incomplete", "band": "insufficient" }
+        {
+          "when": "user in aisle, other manoeuvring, no exceptions",
+          "band": "likely"
+        },
+        {
+          "when": "aisle vehicle too fast",
+          "band": "possible"
+        },
+        {
+          "when": "both manoeuvring OR unsure",
+          "band": "unclear"
+        },
+        {
+          "when": "incomplete",
+          "band": "insufficient"
+        }
       ],
       "outputs": [
         {
@@ -547,7 +711,13 @@
           "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
         }
       ],
-      "escalation_overrides": []
+      "escalation_overrides": [],
+      "legal_signoff": {
+        "approved": true,
+        "version": "5ebd4117487f0450c8d2e2fa8258b0dcdd6001dcae42e5a90a4f31194af8d5d5",
+        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
+        "date": "2026-07-13"
+      }
     },
     {
       "id": "vic-pd7-other",
@@ -570,7 +740,11 @@
         "on_mismatch": "n/a"
       },
       "band_logic": [
-        { "when": "always", "band": "unclear", "note": "catch-all — escalate" }
+        {
+          "when": "always",
+          "band": "unclear",
+          "note": "catch-all — escalate"
+        }
       ],
       "outputs": [
         {
@@ -579,8 +753,17 @@
         }
       ],
       "escalation_overrides": [
-        { "condition": "always", "action": "route_to_human" }
-      ]
+        {
+          "condition": "always",
+          "action": "route_to_human"
+        }
+      ],
+      "legal_signoff": {
+        "approved": true,
+        "version": "5ebd4117487f0450c8d2e2fa8258b0dcdd6001dcae42e5a90a4f31194af8d5d5",
+        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
+        "date": "2026-07-13"
+      }
     }
   ]
 }

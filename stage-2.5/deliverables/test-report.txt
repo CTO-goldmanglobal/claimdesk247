@@ -1,5 +1,5 @@
 STAGE 2.5 ACCEPTANCE TEST REPORT (Engine-as-Endpoint)
-Generated: 2026-07-12T16:42:16.599092Z
+Generated: 2026-07-12T17:16:29.985246Z
 Suite: acceptance-tests.stage25.yaml
 Mode: local (TestClient)
 Stage 2 regression: /Volumes/Goldman Global/businesses/claimdesk247/stage-2/tests/run_acceptance.py
@@ -13,7 +13,7 @@ Stage 3 regression: /Volumes/Goldman Global/businesses/claimdesk247/stage-3/test
 [PASS] T-25-005   gate=G-43   esc-injury short-circuits with no band, terminal=True
 [PASS] T-25-006   gate=G-43   esc-multiparty short-circuits with no band
 [PASS] T-25-007   gate=G-44   full intake used opaque reference only; PII never in URL
-[PASS] T-25-008   gate=G-44   PDF served via opaque ref GF-B0A87EED
+[PASS] T-25-008   gate=G-44   PDF served via opaque ref GF-B734688A
 [PASS] T-25-009   gate=G-45   customer -> 403 (server-side enforced)
 [PASS] T-25-010   gate=G-45   legal_staff -> 200, all 8 brief fields present
 [PASS] T-25-011   gate=G-46   deterministic ref in test mode: GF-6CF7B73B

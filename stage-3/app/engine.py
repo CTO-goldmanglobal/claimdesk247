@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -532,6 +533,22 @@ def _normalise_intake_for_scenario(intake: dict[str, Any], scenario_id: str) -> 
 
 # ----------------------- Band assignment ----------------------- #
 
+_STATE_PD_ID_RE = re.compile(
+    r"^(vic|qld|wa|sa|tas|act|nt)-(pd.+)$", re.IGNORECASE
+)
+
+
+def _canonical_pd_id(scenario_or_exc_id: str) -> str:
+    """Strip state prefix from multi-state PD ids.
+
+    `vic-pd1-rear-end` → `pd1-rear-end`; `qld-pd4-e1` → `pd4-e1`.
+    NSW bare `pd*` ids pass through unchanged. Band helpers and exception
+    checks are written against the bare pd* namespace.
+    """
+    m = _STATE_PD_ID_RE.match(scenario_or_exc_id)
+    return m.group(2) if m else scenario_or_exc_id
+
+
 def _assign_band(scenario: dict[str, Any], intake: dict[str, Any],
                  exceptions_fired: list[str], damage_consistent: bool) -> str:
     """Apply scenario's band_logic and return the band.
@@ -580,12 +597,12 @@ def _assign_band(scenario: dict[str, Any], intake: dict[str, Any],
     if sid.startswith("pl"):
         return _band_pl(sid, intake, exceptions_fired)
 
-    # Property-damage scenarios (Lane 1 beachhead) — recovery-framed bands.
-    # Same deterministic geometry as motor but framed for the at-fault
-    # insurer recovery (Arsalan v Rixon hire entitlement). Ships unsigned
-    # under CD-E4, so in practice every PD scenario escalates until signed.
-    if sid.startswith("pd"):
-        return _band_pd(sid, intake, exceptions_fired)
+    # Property-damage scenarios (Lane 1) — NSW `pd*` and multi-state
+    # `<state>-pd*` share the same band helpers after canonicalisation.
+    pd_sid = _canonical_pd_id(sid)
+    if pd_sid.startswith("pd"):
+        pd_exc = [_canonical_pd_id(e) for e in exceptions_fired]
+        return _band_pd(pd_sid, intake, pd_exc)
 
     # Medical negligence scenarios (spec §3) — escalation-dominant. A substantive
     # med-neg matter never returns a band from a questionnaire (s5O standard of
