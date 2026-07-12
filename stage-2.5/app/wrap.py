@@ -572,16 +572,30 @@ def create_app() -> FastAPI:
     # ---- /healthz (G-47 + G-VER) ----
     @app.get("/healthz")
     def healthz() -> Any:
-        tree = stage3_engine._load_rule_tree()  # type: ignore[attr-defined]  # motor tree
-        # Personal-injury extension (spec §1.2): report a per-claim_type map so
-        # the deployer can see which sub-trees are signed and live.
-        registry = getattr(stage3_engine, "RULE_TREE_REGISTRY", {"motor": "rule-tree.nsw.v3.json"})
+        tree = stage3_engine._load_rule_tree()  # type: ignore[attr-defined]  # NSW motor tree
+        # Multi-state (per MULTI-STATE-ROLLOUT-PLAN.md): the registry is now
+        # keyed by (state, claim_type). healthz reports a per-(state, claim_type)
+        # map so the deployer can see which sub-trees are signed and live in
+        # each state. The fallback preserves backward compat with older engine
+        # builds that still use a flat claim_type-keyed registry.
+        registry = getattr(stage3_engine, "RULE_TREE_REGISTRY",
+                           {("NSW", "motor"): "rule-tree.nsw.v3.json"})
+        # Normalise to a list of (state, claim_type) keys.
+        registry_keys: list[tuple[str, str]] = []
+        for k in registry.keys():
+            if isinstance(k, tuple):
+                registry_keys.append(k)
+            else:
+                # Legacy flat registry (claim_type only) → NSW default.
+                registry_keys.append(("NSW", k))
+        registry_keys.sort()
         rule_tree_versions: dict[str, Any] = {}
-        for claim_type in sorted(registry):
+        for (state, claim_type) in registry_keys:
+            label = f"{state}.{claim_type}"
             try:
-                ct_tree = stage3_engine._load_rule_tree_for(claim_type)  # type: ignore[attr-defined]
+                ct_tree = stage3_engine._load_rule_tree_for(claim_type, state)  # type: ignore[attr-defined]
             except Exception as exc:  # noqa: BLE001 — healthz must never crash
-                rule_tree_versions[claim_type] = {"error": str(exc)}
+                rule_tree_versions[label] = {"error": str(exc)}
                 continue
             scenarios = ct_tree.get("scenarios", [])
             signed = sum(
@@ -589,7 +603,7 @@ def create_app() -> FastAPI:
                 if isinstance(s.get("legal_signoff"), dict)
                 and s["legal_signoff"].get("approved") is True
             )
-            rule_tree_versions[claim_type] = {
+            rule_tree_versions[label] = {
                 "version": ct_tree.get("version", "unknown"),
                 "hash": stage3_engine._compute_scenarios_hash(ct_tree),  # type: ignore[attr-defined]
                 "scenarios": len(scenarios),
@@ -599,9 +613,9 @@ def create_app() -> FastAPI:
         return {
             "status": "ok",
             "engine_version": "1.0.0",
-            "rule_tree_version": tree.get("version", "unknown"),  # motor (back-compat)
-            "rule_tree_hash": stage3_engine._compute_scenarios_hash(tree),  # G-VER, motor
-            "rule_tree_versions": rule_tree_versions,  # per claim_type
+            "rule_tree_version": tree.get("version", "unknown"),  # NSW motor (back-compat)
+            "rule_tree_hash": stage3_engine._compute_scenarios_hash(tree),  # G-VER, NSW motor
+            "rule_tree_versions": rule_tree_versions,  # per (state, claim_type)
             "api_version": STAGE25_VERSION,
         }
 

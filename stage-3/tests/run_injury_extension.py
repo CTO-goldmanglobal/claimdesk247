@@ -34,7 +34,7 @@ from app.engine import (
     DEFAULT_CLAIM_TYPE, LIMITATION_BUFFER_YEARS, MEDNEG_TREATMENT_TYPE_TO_SCENARIO,
     PD_COLLISION_TYPE_TO_SCENARIO, PL_HAZARD_TYPE_TO_SCENARIO, RULE_TREE_REGISTRY, classify,
     _claim_type_for_scenario_id, _compute_scenarios_hash, _load_rule_tree,
-    _load_rule_tree_for,
+    _load_rule_tree_for, _resolve_scenario,
 )
 
 
@@ -68,7 +68,11 @@ def _signed_tree(claim_type: str) -> dict[str, Any]:
 
 def _classify_with_tree(intake: dict[str, Any], fake_tree: dict[str, Any]) -> Any:
     """Run classify() with a specific tree patched in for the resolved
-    claim_type. Restores the real loader afterwards."""
+    (state, claim_type). Restores the real loader afterwards.
+
+    Multi-state (per MULTI-STATE-ROLLOUT-PLAN.md): the typed loader is now
+    keyed by (state, claim_type); the patch must accept both positional args.
+    NSW motor still goes through the zero-arg loader."""
     import app.engine as engmod
     ct = intake.get("claim_type", DEFAULT_CLAIM_TYPE)
     if ct == "motor":
@@ -82,7 +86,7 @@ def _classify_with_tree(intake: dict[str, Any], fake_tree: dict[str, Any]) -> An
             real.cache_clear()
     real_typed = engmod._load_rule_tree_typed
     real_typed.cache_clear()
-    engmod._load_rule_tree_typed = lambda _ct: fake_tree  # type: ignore[assignment]
+    engmod._load_rule_tree_typed = lambda _state, _ct: fake_tree  # type: ignore[assignment]
     try:
         return classify(intake)
     finally:
@@ -255,21 +259,28 @@ def _test_registry_three_distinct_trees() -> tuple[bool, str]:
 
 
 def _test_claim_type_routing() -> tuple[bool, str]:
-    """Scenario id prefixes route to the correct claim_type."""
+    """Scenario id prefixes route to the correct (state, claim_type).
+
+    Multi-state (per MULTI-STATE-ROLLOUT-PLAN.md): _claim_type_for_scenario_id
+    now returns a (state, claim_type) tuple. NSW scenario ids keep their bare
+    prefixes (s/pd/pl/mn) for backward compat; non-NSW scenario ids carry the
+    state in the prefix (vic-pdN-...)."""
     checks = {
-        "s1-rear-end": "motor",
-        "s11-parked-vehicle": "motor",
-        "pl1-slip-wet-surface": "public_liability",
-        "pl6-other-public-place": "public_liability",
-        "mn1-surgical-outcome": "medical_negligence",
-        "mn4-birth-injury": "medical_negligence",
+        "s1-rear-end": ("NSW", "motor"),
+        "s11-parked-vehicle": ("NSW", "motor"),
+        "pl1-slip-wet-surface": ("NSW", "public_liability"),
+        "pl6-other-public-place": ("NSW", "public_liability"),
+        "mn1-surgical-outcome": ("NSW", "medical_negligence"),
+        "mn4-birth-injury": ("NSW", "medical_negligence"),
+        "pd1-rear-end": ("NSW", "property_damage"),
+        "vic-pd1-rear-end": ("VIC", "property_damage"),
     }
     bad = [(sid, want, _claim_type_for_scenario_id(sid))
            for sid, want in checks.items()
            if _claim_type_for_scenario_id(sid) != want]
     if bad:
         return False, f"routing mismatches: {bad}"
-    return True, f"all {len(checks)} scenario-id → claim_type routes correct"
+    return True, f"all {len(checks)} scenario-id → (state, claim_type) routes correct"
 
 
 def _test_new_escalation_triggers() -> tuple[bool, str]:
@@ -458,15 +469,19 @@ def _test_pd_signed_bands_deterministically() -> tuple[bool, str]:
 
 
 def _test_pd_routing_and_registry_four_trees() -> tuple[bool, str]:
-    """PD scenario ids route to property_damage; the registry now has 4 trees
-    with distinct hashes. Updates IX-07/IX-08 for the 4-tree world."""
-    # Routing
+    """PD scenario ids route to (NSW, property_damage); the NSW registry has 4
+    trees with distinct hashes. Updates IX-07/IX-08 for the 4-NSW-tree world.
+
+    Multi-state note (per MULTI-STATE-ROLLOUT-PLAN.md): the registry now also
+    contains a VIC PD entry (5 trees total), but that is a separate concern
+    tested by IX-18/IX-19/IX-20. This case only verifies the NSW core."""
+    # Routing (state, claim_type)
     route_checks = {
-        "pd1-rear-end": "property_damage",
-        "pd7-other": "property_damage",
-        "s1-rear-end": "motor",
-        "pl1-slip-wet-surface": "public_liability",
-        "mn1-surgical-outcome": "medical_negligence",
+        "pd1-rear-end": ("NSW", "property_damage"),
+        "pd7-other": ("NSW", "property_damage"),
+        "s1-rear-end": ("NSW", "motor"),
+        "pl1-slip-wet-surface": ("NSW", "public_liability"),
+        "mn1-surgical-outcome": ("NSW", "medical_negligence"),
     }
     bad_routes = [(sid, want, _claim_type_for_scenario_id(sid))
                   for sid, want in route_checks.items()
@@ -474,14 +489,16 @@ def _test_pd_routing_and_registry_four_trees() -> tuple[bool, str]:
     if bad_routes:
         return False, f"routing mismatches: {bad_routes}"
 
-    # Registry: 4 distinct trees
-    if len(RULE_TREE_REGISTRY) != 4:
-        return False, f"registry has {len(RULE_TREE_REGISTRY)} trees, expected 4"
-    hashes = {ct: _compute_scenarios_hash(_load_rule_tree_for(ct))
-              for ct in ("motor", "property_damage", "public_liability", "medical_negligence")}
+    # NSW core: 4 distinct trees (the VIC PD tree is verified separately)
+    nsw_claims = ("motor", "property_damage", "public_liability", "medical_negligence")
+    nsw_entries = {ct: fn for (st, ct), fn in RULE_TREE_REGISTRY.items() if st == "NSW"}
+    if len(nsw_entries) != 4:
+        return False, f"NSW registry has {len(nsw_entries)} trees, expected 4"
+    hashes = {ct: _compute_scenarios_hash(_load_rule_tree_for(ct, "NSW"))
+              for ct in nsw_claims}
     if len(set(hashes.values())) != 4:
-        return False, f"4 trees but hashes not distinct: {[h[:8] for h in hashes.values()]}"
-    return True, ("4 trees registered, 4 distinct hashes, PD routing correct "
+        return False, f"4 NSW trees but hashes not distinct: {[h[:8] for h in hashes.values()]}"
+    return True, ("4 NSW trees registered, 4 distinct hashes, PD routing correct "
                   f"(hashes: {[h[:8] for h in hashes.values()]})")
 
 
@@ -508,6 +525,132 @@ def _test_pd_backward_compat_motor_unchanged() -> tuple[bool, str]:
 
 
 # -----------------------------------------------------------------------
+# Multi-state (per MULTI-STATE-ROLLOUT-PLAN.md) — VIC PD as proof state.
+# These tests prove the multi-state scaffold works end-to-end without
+# enabling a single band in the new state until Legal Head signs.
+# -----------------------------------------------------------------------
+
+def _test_vic_pd_routing() -> tuple[bool, str]:
+    """VIC PD intakes route to the VIC tree's scenario ids (prefixed vic-pdN).
+    Confirms _resolve_scenario dispatches by (state, claim_type) and that the
+    state prefix is applied to keep scenario ids globally unique."""
+    # Resolve a rear-end PD intake in VIC.
+    sid = _resolve_scenario({
+        "state": "VIC", "claim_type": "property_damage",
+        "collision_type": "rear-end", "injuries": "none",
+    })
+    if sid != "vic-pd1-rear-end":
+        return False, f"VIC rear-end routed to {sid!r}, expected 'vic-pd1-rear-end'"
+    # And a couple more collision types.
+    for col, expected_suffix in [
+        ("reversing", "vic-pd3-reversing"),
+        ("parked_hit", "vic-pd4-parked-vehicle-struck"),
+        ("lane_change", "vic-pd5-changing-lanes-sideswipe"),
+        ("car_park", "vic-pd6-car-park"),
+        ("other", "vic-pd7-other"),
+    ]:
+        sid = _resolve_scenario({
+            "state": "VIC", "claim_type": "property_damage",
+            "collision_type": col, "injuries": "none",
+        })
+        if sid != expected_suffix:
+            return False, f"VIC {col!r} routed to {sid!r}, expected {expected_suffix!r}"
+    return True, "VIC PD collision types route to vic-pdN scenario ids (state-prefixed)"
+
+
+def _test_vic_pd_unsigned_escalates() -> tuple[bool, str]:
+    """Every VIC PD scenario ships UNSIGNED in rule-tree.vic.pd.v1.json, so the
+    engine must escalate every VIC PD intake as 'unsigned-scenario' (G-PROD-LOCK).
+    No band is emitted in VIC until Legal Head signs the tree — this is the
+    safety property that lets us merge the scaffold before the legal work is done."""
+    violations = []
+    for col in ("rear-end", "give_way", "reversing", "parked_hit",
+                "lane_change", "car_park", "other"):
+        intake = {"state": "VIC", "claim_type": "property_damage",
+                  "collision_type": col, "injuries": "none"}
+        er = classify(intake)
+        # The live VIC tree is unsigned, so the engine escalates without a band.
+        if er.escalation != "unsigned-scenario":
+            violations.append(
+                f"{col}: expected unsigned-scenario, got escalation={er.escalation!r} band={er.band!r}")
+        if er.band is not None:
+            violations.append(f"{col}: emitted band={er.band!r} (forbidden — VIC unsigned)")
+    if violations:
+        return False, "; ".join(violations)
+    return True, "all 7 VIC PD collision types → unsigned-scenario, no band (G-PROD-LOCK holds)"
+
+
+def _test_vic_pd_injury_firewall() -> tuple[bool, str]:
+    """The injury firewall applies in VIC too. Any injury mention escalates as
+    esc-injury, before scenario resolution, with no band. This is the red line
+    that keeps Lane 1 (PD) clean of Lane 2 (CTP/TAC injury) exposure in any state."""
+    violations = []
+    for col in ("rear-end", "give_way", "reversing"):
+        for inj in ("minor", "serious"):
+            intake = {"state": "VIC", "claim_type": "property_damage",
+                      "collision_type": col, "injuries": inj}
+            er = classify(intake)
+            if er.escalation != "esc-injury":
+                violations.append(
+                    f"VIC {col}+injuries={inj}: expected esc-injury, got {er.escalation!r}")
+            if er.band is not None:
+                violations.append(
+                    f"VIC {col}+injuries={inj}: emitted band={er.band!r} (forbidden — injury firewall)")
+    if violations:
+        return False, "; ".join(violations)
+    return True, "VIC PD collision types × {minor,serious} → esc-injury, no band (firewall holds across states)"
+
+
+def _test_vic_pd_hash_isolation() -> tuple[bool, str]:
+    """Mutating the VIC PD tree must NOT change any NSW hash (motor, PD, PL,
+    med-neg). Extends IX-14's isolation property to the multi-state registry.
+    Also confirms the VIC tree has its own distinct hash."""
+    nsw_claims = ("motor", "property_damage", "public_liability", "medical_negligence")
+    nsw_hashes_before = {ct: _compute_scenarios_hash(_load_rule_tree_for(ct, "NSW"))
+                         for ct in nsw_claims}
+    vic_hash_before = _compute_scenarios_hash(_load_rule_tree_for("property_damage", "VIC"))
+
+    # Mutate a copy of the VIC tree.
+    import copy
+    vic_mutated = copy.deepcopy(_load_rule_tree_for("property_damage", "VIC"))
+    vic_mutated["scenarios"][0]["_test_mutation"] = "cosmetic-vic-change"
+    vic_hash_after_mutation = _compute_scenarios_hash(vic_mutated)
+
+    # NSW hashes are recomputed fresh (cache cleared).
+    nsw_hashes_after = {ct: _compute_scenarios_hash(_load_rule_tree_for(ct, "NSW"))
+                        for ct in nsw_claims}
+
+    if vic_hash_after_mutation == vic_hash_before:
+        return False, "VIC hash did NOT change after mutation (hash not content-bound)"
+    for ct in nsw_claims:
+        if nsw_hashes_before[ct] != nsw_hashes_after[ct]:
+            return False, f"NSW {ct} hash changed across VIC mutation (isolation broken)"
+    # VIC's hash must also differ from NSW PD's hash (different content, by design).
+    if vic_hash_before == nsw_hashes_before["property_damage"]:
+        return False, "VIC PD hash equals NSW PD hash (trees not actually distinct)"
+    return True, (f"VIC PD hash changed ({vic_hash_before[:8]} → {vic_hash_after_mutation[:8]}); "
+                  f"all 4 NSW hashes stable ({[nsw_hashes_after[c][:8] for c in nsw_claims]})")
+
+
+def _test_unregistered_state_escalates() -> tuple[bool, str]:
+    """A state with no registered tree (e.g. QLD today) must escalate as
+    state-scope, not produce a band. This preserves the original G-21 behaviour
+    for any state we haven't rolled out yet."""
+    er = classify({"state": "QLD", "claim_type": "property_damage",
+                   "collision_type": "rear-end", "injuries": "none"})
+    if er.escalation != "state-scope":
+        return False, f"QLD PD intake: expected state-scope, got escalation={er.escalation!r} band={er.band!r}"
+    if er.band is not None:
+        return False, f"QLD PD intake emitted band={er.band!r} (forbidden — QLD not registered)"
+    # Same for motor in VIC (VIC only has PD registered, no motor tree).
+    er2 = classify({"state": "VIC", "claim_type": "motor",
+                    "accident_type": "rear-end", "injuries": "none"})
+    if er2.escalation != "state-scope":
+        return False, f"VIC motor intake: expected state-scope (no VIC motor tree), got {er2.escalation!r}"
+    return True, "QLD PD → state-scope; VIC motor → state-scope (only VIC PD is registered)"
+
+
+# -----------------------------------------------------------------------
 # Runner
 # -----------------------------------------------------------------------
 
@@ -530,6 +673,12 @@ CASES: list[tuple[str, Callable[[], tuple[bool, str]]]] = [
     ("IX-15", _test_pd_signed_bands_deterministically),
     ("IX-16", _test_pd_routing_and_registry_four_trees),
     ("IX-17", _test_pd_backward_compat_motor_unchanged),
+    # Multi-state (per MULTI-STATE-ROLLOUT-PLAN.md) — VIC PD as proof state.
+    ("IX-18", _test_vic_pd_routing),
+    ("IX-19", _test_vic_pd_unsigned_escalates),
+    ("IX-20", _test_vic_pd_injury_firewall),
+    ("IX-21", _test_vic_pd_hash_isolation),
+    ("IX-22", _test_unregistered_state_escalates),
 ]
 
 

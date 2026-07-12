@@ -50,26 +50,48 @@ STAGE3_DIR = Path(__file__).resolve().parent.parent.parent / "stage-3"
 sys.path.insert(0, str(STAGE3_DIR))
 
 from app.engine import (  # noqa: E402  (path setup above)
-    RULE_TREE_REGISTRY, _compute_scenarios_hash, _load_rule_tree_for,
+    DEFAULT_CLAIM_TYPE, DEFAULT_STATE, RULE_TREE_REGISTRY,
+    _compute_scenarios_hash, _load_rule_tree_for,
 )
 
 DATA_DIR = STAGE3_DIR / "app" / "data"
 
 
-def _load_tree_from_disk(claim_type: str) -> dict:
+def _registry_keys() -> list[tuple[str, str]]:
+    """All (state, claim_type) keys in the registry, sorted by (state, claim_type)."""
+    return sorted(RULE_TREE_REGISTRY.keys(), key=lambda k: (k[0], k[1]))
+
+
+def _format_key(state: str, claim_type: str) -> str:
+    """Human-readable key for CLI output: 'NSW.motor', 'VIC.property_damage'."""
+    return f"{state}.{claim_type}"
+
+
+def _parse_key(s: str) -> tuple[str, str]:
+    """Parse a CLI selector like 'NSW.motor' or 'VIC.property_damage' into a
+    (state, claim_type) tuple. Backward-compat: a bare claim_type ('motor')
+    is interpreted as NSW.<claim_type>."""
+    if "." in s:
+        state, ct = s.split(".", 1)
+        return (state.upper(), ct)
+    # Backward-compat: bare claim_type → NSW claim_type
+    return (DEFAULT_STATE, s)
+
+
+def _load_tree_from_disk(state: str, claim_type: str) -> dict:
     """Load the tree fresh from disk (bypassing the lru_cache)."""
-    filename = RULE_TREE_REGISTRY[claim_type]
+    filename = RULE_TREE_REGISTRY[(state, claim_type)]
     with (DATA_DIR / filename).open() as f:
         return json.load(f)
 
 
-def _sign_tree(claim_type: str, by: str, date: str) -> tuple[int, str]:
+def _sign_tree(state: str, claim_type: str, by: str, date: str) -> tuple[int, str]:
     """Sign every scenario in one tree. Returns (n_scenarios_signed, hash).
 
     Idempotent: re-running with the same content produces the same sign-off
     block (the hash doesn't depend on the sign-off metadata). Re-running after
     a content change re-stamps with the new hash (a re-sign)."""
-    tree = _load_tree_from_disk(claim_type)
+    tree = _load_tree_from_disk(state, claim_type)
     h = _compute_scenarios_hash(tree)
     n = 0
     for s in tree["scenarios"]:
@@ -81,7 +103,7 @@ def _sign_tree(claim_type: str, by: str, date: str) -> tuple[int, str]:
         }
         n += 1
     # Write back, preserving the registry filename.
-    filename = RULE_TREE_REGISTRY[claim_type]
+    filename = RULE_TREE_REGISTRY[(state, claim_type)]
     out_path = DATA_DIR / filename
     with out_path.open("w") as f:
         json.dump(tree, f, indent=2, ensure_ascii=False)
@@ -89,10 +111,10 @@ def _sign_tree(claim_type: str, by: str, date: str) -> tuple[int, str]:
     return n, h
 
 
-def _verify_tree(claim_type: str) -> tuple[bool, str]:
+def _verify_tree(state: str, claim_type: str) -> tuple[bool, str]:
     """Read-only check: does every signed scenario's version match the current
     content hash? Returns (all_ok, detail)."""
-    tree = _load_tree_from_disk(claim_type)
+    tree = _load_tree_from_disk(state, claim_type)
     current_hash = _compute_scenarios_hash(tree)
     scenarios = tree.get("scenarios", [])
     signed_ok = 0
@@ -109,7 +131,8 @@ def _verify_tree(claim_type: str) -> tuple[bool, str]:
             stale += 1
     total = len(scenarios)
     live = (signed_ok == total)
-    detail = (f"{claim_type}: {signed_ok}/{total} signed-ok, "
+    label = _format_key(state, claim_type)
+    detail = (f"{label}: {signed_ok}/{total} signed-ok, "
               f"{unsigned} unsigned, {stale} stale, hash={current_hash[:12]}, "
               f"live={'true' if live else 'false'}")
     return live, detail
@@ -119,8 +142,16 @@ def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     g = p.add_mutually_exclusive_group(required=True)
-    g.add_argument("--tree", choices=sorted(RULE_TREE_REGISTRY),
-                   help="Sign a single tree")
+    # --tree accepts a selector. Forms: 'NSW.motor', 'VIC.property_damage', or
+    # bare 'motor' (interpreted as NSW.motor for backward compat with the
+    # original single-state CLI).
+    key_choices = [_format_key(st, ct) for (st, ct) in _registry_keys()]
+    legacy_choices = [ct for (st, ct) in _registry_keys() if st == DEFAULT_STATE]
+    all_choices = sorted(set(key_choices) | set(legacy_choices))
+    g.add_argument("--tree", choices=all_choices,
+                   help="Sign a single tree. Selector forms: '<STATE>.<claim_type>' "
+                        "(e.g. 'VIC.property_damage') or bare '<claim_type>' "
+                        "(interpreted as NSW.<claim_type> for backward compat).")
     g.add_argument("--all", action="store_true",
                    help="Sign all trees in the registry")
     g.add_argument("--verify", action="store_true",
@@ -132,8 +163,8 @@ def main() -> int:
     if args.verify:
         print("Verifying rule-tree sign-off state (read-only)...")
         all_ok = True
-        for ct in sorted(RULE_TREE_REGISTRY):
-            ok, detail = _verify_tree(ct)
+        for (st, ct) in _registry_keys():
+            ok, detail = _verify_tree(st, ct)
             print(f"  [{'OK' if ok else 'STALE/MISSING'}] {detail}")
             if not ok:
                 all_ok = False
@@ -141,21 +172,26 @@ def main() -> int:
             print("\nAll trees live (every scenario carries a current sign-off).")
             return 0
         print("\nOne or more trees are NOT live — unsigned or stale scenarios present.")
+        print("Unsigned trees are EXPECTED for new states staged before Legal Head sign-off "
+              "(per MULTI-STATE-ROLLOUT-PLAN.md).")
         return 1
 
     if not args.by:
         p.error("--by is required when signing (use --verify for a read-only check)")
     date = args.date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    trees = sorted(RULE_TREE_REGISTRY) if args.all else [args.tree]
-    print(f"Signing rule trees: {', '.join(trees)}")
+    if args.all:
+        trees = _registry_keys()
+    else:
+        trees = [_parse_key(args.tree)]
+    print(f"Signing rule trees: {', '.join(_format_key(st, ct) for (st, ct) in trees)}")
     print(f"  by: {args.by}")
     print(f"  date: {date}")
     print()
-    for ct in trees:
-        n, h = _sign_tree(ct, args.by, date)
-        print(f"  [SIGNED] {ct}: {n} scenarios stamped, hash={h[:16]}…, "
-              f"file={RULE_TREE_REGISTRY[ct]}")
+    for (st, ct) in trees:
+        n, h = _sign_tree(st, ct, args.by, date)
+        print(f"  [SIGNED] {_format_key(st, ct)}: {n} scenarios stamped, hash={h[:16]}…, "
+              f"file={RULE_TREE_REGISTRY[(st, ct)]}")
     print("\nDone. Re-run with --verify to confirm all trees are live.")
     print("Commit the signed JSON files to record the sign-off event.")
     return 0

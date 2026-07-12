@@ -218,48 +218,76 @@ class EngineResult:
 # `_load_rule_tree_for(claim_type)` which the tests do not patch.
 
 DEFAULT_CLAIM_TYPE = "motor"
+DEFAULT_STATE = "NSW"
 
-RULE_TREE_REGISTRY: dict[str, str] = {
-    "motor": "rule-tree.nsw.v3.json",
-    "property_damage": "rule-tree.nsw.pd.v1.json",
-    "public_liability": "rule-tree.nsw.pl.v1.json",
-    "medical_negligence": "rule-tree.nsw.medneg.v1.json",
+# Multi-state rule-tree registry (per MULTI-STATE-ROLLOUT-PLAN.md §5).
+# Keyed by (state, claim_type). NSW remains the default for every claim type;
+# additional states add entries only for claim types they have a signed (or
+# staging-unsigned) tree for. Trees absent from this registry escalate as
+# `state-scope`, exactly as a non-NSW intake does today.
+#
+# Each tree's sign-off hash is computed from its own scenarios[] (CD-E4 per-tree
+# hashing), so adding a VIC PD tree does not change any NSW hash. A tree with
+# its scenarios' `legal_signoff` blocks stripped (or set approved=false) makes
+# every scenario escalate as `unsigned-scenario` under G-PROD-LOCK — that is
+# the safety property that lets us merge the engineering scaffold for a new
+# state before Legal Head has signed its content.
+RULE_TREE_REGISTRY: dict[tuple[str, str], str] = {
+    ("NSW", "motor"): "rule-tree.nsw.v3.json",
+    ("NSW", "property_damage"): "rule-tree.nsw.pd.v1.json",
+    ("NSW", "public_liability"): "rule-tree.nsw.pl.v1.json",
+    ("NSW", "medical_negligence"): "rule-tree.nsw.medneg.v1.json",
+    # VIC PD — Lane 1 beachhead, second state. Scenarios ship UNSIGNED so the
+    # engine escalates every VIC PD intake as `unsigned-scenario` until Legal
+    # Head signs the tree (CD-R2 + PD counsel memo for VIC required first).
+    ("VIC", "property_damage"): "rule-tree.vic.pd.v1.json",
 }
 
 
-def _claim_type_for_scenario_id(scenario_id: str) -> str:
-    """Route a scenario id to its claim_type by prefix. Motor scenarios use
-    `sN-...`, PD uses `pdN-...`, PL uses `plN-...`, med-neg uses `mnN-...`."""
+def _claim_type_for_scenario_id(scenario_id: str) -> tuple[str, str]:
+    """Route a scenario id to (state, claim_type) by prefix.
+
+    NSW scenarios use the bare prefixes `sN-...`, `pdN-...`, `plN-...`,
+    `mnN-...` (preserves backward compat with every existing test). Multi-state
+    scenarios carry the state in the prefix: `vic-pdN-...`, `qld-pdN-...`, etc.
+    Only PD is rolling out per the multi-state plan, so only PD prefixes are
+    state-extended here; motor/PL/med-neg remain NSW-only and escalate as
+    `state-scope` for any non-NSW intake via _resolve_scenario.
+    """
+    low = scenario_id.lower()
+    if low.startswith("vic-pd") or low.startswith("vic-pd"):
+        return ("VIC", "property_damage")
     if scenario_id.startswith("pd"):
-        return "property_damage"
+        return ("NSW", "property_damage")
     if scenario_id.startswith("pl"):
-        return "public_liability"
+        return ("NSW", "public_liability")
     if scenario_id.startswith("mn"):
-        return "medical_negligence"
-    return "motor"
+        return ("NSW", "medical_negligence")
+    return ("NSW", "motor")
 
 
-@lru_cache(maxsize=8)
-def _load_rule_tree_typed(claim_type: str) -> dict[str, Any]:
-    """Load the rule tree for the given claim_type. Cached per claim_type.
+@lru_cache(maxsize=16)
+def _load_rule_tree_typed(state: str, claim_type: str) -> dict[str, Any]:
+    """Load the rule tree for the given (state, claim_type). Cached per pair.
     This is the typed loader used by _load_rule_tree_for(); the tests patch
-    the public zero-arg _load_rule_tree (motor only), not this one."""
-    filename = RULE_TREE_REGISTRY.get(claim_type)
+    the public zero-arg _load_rule_tree (NSW motor only), not this one."""
+    filename = RULE_TREE_REGISTRY.get((state, claim_type))
     if filename is None:
-        raise KeyError(f"unknown claim_type: {claim_type!r}; "
+        raise KeyError(f"unknown (state, claim_type): ({state!r}, {claim_type!r}); "
                        f"known: {sorted(RULE_TREE_REGISTRY)}")
     with (DATA_DIR / filename).open() as f:
         return json.load(f)
 
 
-def _load_rule_tree_for(claim_type: str) -> dict[str, Any]:
+def _load_rule_tree_for(claim_type: str, state: str = DEFAULT_STATE) -> dict[str, Any]:
     """Public typed lookup. Clears through the cache so test monkey-patches
-    on the motor loader are honored for motor while typed trees load fresh."""
-    if claim_type == DEFAULT_CLAIM_TYPE:
-        # Motor path: defer to the (possibly monkey-patched) zero-arg loader
+    on the motor loader are honored for NSW motor while typed trees load fresh.
+    `state` defaults to NSW so every existing call site keeps working unchanged."""
+    if state == DEFAULT_STATE and claim_type == DEFAULT_CLAIM_TYPE:
+        # NSW motor path: defer to the (possibly monkey-patched) zero-arg loader
         # so sign-off / hash tests that patch _load_rule_tree keep working.
         return _load_rule_tree()
-    return _load_rule_tree_typed(claim_type)
+    return _load_rule_tree_typed(state, claim_type)
 
 
 @lru_cache(maxsize=1)
@@ -272,8 +300,8 @@ def _load_rule_tree() -> dict[str, Any]:
 
 
 def _scenario_by_id(scenario_id: str) -> dict[str, Any]:
-    claim_type = _claim_type_for_scenario_id(scenario_id)
-    tree = _load_rule_tree_for(claim_type)
+    state, claim_type = _claim_type_for_scenario_id(scenario_id)
+    tree = _load_rule_tree_for(claim_type, state)
     for s in tree["scenarios"]:
         if s["id"] == scenario_id:
             return s
@@ -418,14 +446,26 @@ def _is_exception_positive(slot: str, value: Any) -> bool:
 # ----------------------- Scenario resolution ----------------------- #
 
 def _resolve_scenario(intake: dict[str, Any]) -> str | None:
-    """Map intake to scenario id. Returns None for non-NSW or other unmatchable.
+    """Map intake to scenario id. Returns None when the intake is out of scope
+    for the engine — either because (state, claim_type) has no registered tree
+    (escalates as `state-scope`) or because the accident descriptor doesn't map
+    to a scenario in the registered tree.
+
+    Multi-state (per MULTI-STATE-ROLLOUT-PLAN.md §5): resolution is gated on
+    (state, claim_type) being present in RULE_TREE_REGISTRY. NSW is the default
+    for every existing test that doesn't pass a state. Non-NSW intakes without
+    a registered tree escalate as `state-scope`, exactly as before.
 
     Personal-injury extension (spec §1.2): resolve `claim_type` first, then
     resolve the scenario within that claim_type's tree. Motor is the default
     when claim_type is absent (backward compat with all existing tests)."""
-    if intake.get("state") and intake["state"] != "NSW":
-        return None
+    state = intake.get("state", DEFAULT_STATE) or DEFAULT_STATE
     claim_type = intake.get("claim_type", DEFAULT_CLAIM_TYPE)
+
+    # State-scope guard: if no tree is registered for (state, claim_type), the
+    # engine does not attempt classification. Returns None → state-scope esc.
+    if (state, claim_type) not in RULE_TREE_REGISTRY:
+        return None
 
     if claim_type == "motor":
         acc = intake.get("accident_type")
@@ -437,7 +477,14 @@ def _resolve_scenario(intake: dict[str, Any]) -> str | None:
         col = intake.get("collision_type") or intake.get("accident_type")
         if not col:
             return None
-        return PD_COLLISION_TYPE_TO_SCENARIO.get(col)
+        sid = PD_COLLISION_TYPE_TO_SCENARIO.get(col)
+        if sid is None:
+            return None
+        # Prefix the state for non-NSW PD so the scenario id is globally unique
+        # and routes back to the right tree via _claim_type_for_scenario_id.
+        if state != DEFAULT_STATE:
+            sid = f"{state.lower()}-{sid}"
+        return sid
 
     if claim_type == "public_liability":
         haz = intake.get("hazard_type")
@@ -1047,7 +1094,10 @@ def classify(intake: dict[str, Any]) -> EngineResult:
             escalation_reason=global_esc[1],
         )
 
-    # 2. Resolve scenario. If non-NSW, no classification attempted (G-21).
+    # 2. Resolve scenario. If (state, claim_type) has no registered tree, or the
+    # accident descriptor doesn't map to a scenario, no classification attempted
+    # (G-21). Today every NSW claim_type is registered; non-NSW is registered
+    # only for claim types that have a tree (per MULTI-STATE-ROLLOUT-PLAN.md).
     scenario_id = _resolve_scenario(intake)
     if scenario_id is None:
         return EngineResult(
@@ -1055,7 +1105,7 @@ def classify(intake: dict[str, Any]) -> EngineResult:
             band=None,
             classification_attempted=False,
             escalation="state-scope",
-            escalation_reason="non-NSW or unmappable accident_type",
+            escalation_reason="state/claim_type has no registered rule tree, or unmappable accident descriptor",
         )
 
     scenario = _scenario_by_id(scenario_id)
@@ -1063,13 +1113,14 @@ def classify(intake: dict[str, Any]) -> EngineResult:
     # 3. G-PROD-LOCK / G-VER: enforce Legal Head sign-off on the rule tree.
     # A scenario without a matching sign-off never returns a band — it escalates.
     # The current_hash binds the sign-off to the scenario's logical content; any
-    # change to the scenario's body invalidates the existing sign-off.
+    # change to a scenario's body invalidates the existing sign-off.
     #
-    # Personal-injury extension (spec §1.5): the hash is computed PER TREE for
-    # the claim_type that owns this scenario. Mutating the PL tree does not
-    # stale the motor sign-off, and vice versa.
-    scenario_claim_type = _claim_type_for_scenario_id(scenario_id)
-    resolved_tree = _load_rule_tree_for(scenario_claim_type)
+    # Per-tree hashing (spec §1.5 + MULTI-STATE-ROLLOUT-PLAN §6): the hash is
+    # computed PER TREE for the (state, claim_type) that owns this scenario.
+    # Mutating the PL tree, or adding a VIC PD tree, does not stale the NSW motor
+    # sign-off, and vice versa.
+    scenario_state, scenario_claim_type = _claim_type_for_scenario_id(scenario_id)
+    resolved_tree = _load_rule_tree_for(scenario_claim_type, scenario_state)
     current_hash = _compute_scenarios_hash(resolved_tree)
     signoff_ok, signoff_reason = _check_legal_signoff(scenario, current_hash)
     if not signoff_ok:
