@@ -241,7 +241,18 @@ RULE_TREE_REGISTRY: dict[tuple[str, str], str] = {
     # engine escalates every VIC PD intake as `unsigned-scenario` until Legal
     # Head signs the tree (CD-R2 + PD counsel memo for VIC required first).
     ("VIC", "property_damage"): "rule-tree.vic.pd.v1.json",
+    # QLD + WA PD — same Lane 1 beachhead scaffold as VIC. UNSIGNED until
+    # Legal Head signs (CD-R2 + PD counsel memo required per state).
+    ("QLD", "property_damage"): "rule-tree.qld.pd.v1.json",
+    ("WA", "property_damage"): "rule-tree.wa.pd.v1.json",
 }
+
+# States whose PD tree is registered (signed or staging-unsigned). Used by the
+# intake state-scope guard so VIC/QLD/WA are accepted at slot-fill time; the
+# engine still escalates unsigned trees via G-PROD-LOCK.
+PD_REGISTERED_STATES: frozenset[str] = frozenset(
+    st for (st, ct) in RULE_TREE_REGISTRY if ct == "property_damage"
+)
 
 
 def _claim_type_for_scenario_id(scenario_id: str) -> tuple[str, str]:
@@ -249,14 +260,18 @@ def _claim_type_for_scenario_id(scenario_id: str) -> tuple[str, str]:
 
     NSW scenarios use the bare prefixes `sN-...`, `pdN-...`, `plN-...`,
     `mnN-...` (preserves backward compat with every existing test). Multi-state
-    scenarios carry the state in the prefix: `vic-pdN-...`, `qld-pdN-...`, etc.
-    Only PD is rolling out per the multi-state plan, so only PD prefixes are
-    state-extended here; motor/PL/med-neg remain NSW-only and escalate as
-    `state-scope` for any non-NSW intake via _resolve_scenario.
+    scenarios carry the state in the prefix: `vic-pdN-...`, `qld-pdN-...`,
+    `wa-pdN-...`. Only PD is rolling out per the multi-state plan; motor/PL/
+    med-neg remain NSW-only and escalate as `state-scope` for any non-NSW
+    intake via _resolve_scenario.
     """
     low = scenario_id.lower()
-    if low.startswith("vic-pd") or low.startswith("vic-pd"):
+    if low.startswith("vic-pd"):
         return ("VIC", "property_damage")
+    if low.startswith("qld-pd"):
+        return ("QLD", "property_damage")
+    if low.startswith("wa-pd"):
+        return ("WA", "property_damage")
     if scenario_id.startswith("pd"):
         return ("NSW", "property_damage")
     if scenario_id.startswith("pl"):

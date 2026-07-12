@@ -53,8 +53,13 @@ class Session:
 # customer picks motor, the motor branch runs as before. When they pick PL or
 # med-neg, the matching branch's slots run instead. The injuries check
 # (G-19/G-20) stays reachable from any state.
+# Multi-state PD beachhead (VIC/QLD/WA) is selectable at intake. Unregistered
+# values (outside_nsw / anything else) still escalate via the state-scope guard.
+# Motor/PL/med-neg remain NSW-live; non-NSW + non-PD escalates in the engine.
+MULTI_STATE_OPTIONS: list[str] = ["NSW", "VIC", "QLD", "WA", "outside_nsw"]
+
 MOTOR_SLOTS: list[dict[str, Any]] = [
-    {"id": 1, "slot": "state_of_accident", "type": "enum", "options": ["NSW", "outside_nsw"], "mandatory": True},
+    {"id": 1, "slot": "state_of_accident", "type": "enum", "options": list(MULTI_STATE_OPTIONS), "mandatory": True},
     {"id": 2, "slot": "datetime_location", "type": "text", "mandatory": True},
     {"id": 3, "slot": "accident_type", "type": "enum", "options": ["rear-end", "T-intersection", "roundabout", "merge", "reversing", "car_park", "parked_hit", "intersection_signalised", "turning_right", "sideswipe_same_direction", "multi_vehicle", "not_listed"], "mandatory": True},
     {"id": 4, "slot": "user_vehicle", "type": "text", "mandatory": True},
@@ -101,7 +106,7 @@ FRONTEND_MOTOR_SLOTS: list[dict[str, Any]] = [
 # map (motor slot 7) IS shown for PD (it's a motor collision). Injuries shared
 # (collected at end; any injury → esc-injury → PI pathway, hard firewall).
 PD_SLOTS: list[dict[str, Any]] = [
-    {"id": 1, "slot": "state_of_accident", "type": "enum", "options": ["NSW", "outside_nsw"], "mandatory": True},
+    {"id": 1, "slot": "state_of_accident", "type": "enum", "options": list(MULTI_STATE_OPTIONS), "mandatory": True},
     {"id": 100, "slot": "claim_type", "type": "enum", "options": ["motor", "property_damage", "public_liability", "medical_negligence"], "mandatory": True},
     {"id": 400, "slot": "collision_type", "type": "enum", "options": ["rear-end", "T-intersection", "give_way", "reversing", "parked_hit", "parking", "sideswipe_same_direction", "lane_change", "car_park", "other"], "mandatory": True},
     {"id": 401, "slot": "incident_date", "type": "text", "mandatory": True},
@@ -298,13 +303,14 @@ def submit_slot(session: Session, slot_id: int, value: Any) -> dict[str, Any]:
         session.reference = _new_reference()
         return {"escalation": "esc-injury", "end_state": "SX-ESCALATE", "reference": session.reference}
 
-    # State-scope guard after slot 1 (G-21). NSW-only product: anything other
-    # than NSW (the dropdown offers "outside_nsw") routes to a human callback —
-    # the lead is captured, not dead-ended.
-    if slot_def["slot"] == "state_of_accident" and value != "NSW":
+    # State-scope guard after slot 1 (G-21). Registered PD states (NSW/VIC/QLD/WA)
+    # continue; "outside_nsw" / anything else routes to a human callback — the
+    # lead is captured, not dead-ended. Unsigned VIC/QLD/WA PD trees still
+    # escalate later via G-PROD-LOCK (unsigned-scenario) until Legal Head signs.
+    if slot_def["slot"] == "state_of_accident" and value not in ("NSW", "VIC", "QLD", "WA"):
         session.state = "SX-ESCALATE"
         session.escalation = "state-scope"
-        session.escalation_reason = f"non-NSW accident: {value}"
+        session.escalation_reason = f"out-of-scope accident state: {value}"
         session.reference = _new_reference()
         return {"state_scope_guard_shown": True, "escalation": "callback",
                 "end_state": "SX-ESCALATE", "reference": session.reference}

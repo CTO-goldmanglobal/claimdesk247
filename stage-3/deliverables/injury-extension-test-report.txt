@@ -1,5 +1,5 @@
 PERSONAL-INJURY EXTENSION TEST REPORT
-Generated: 2026-07-04T20:22:27.212450Z
+Generated: 2026-07-12T16:29:26.925947Z
 Spec: claimdesk-injury-extension-INSTRUCTIONS-2026-07-03.md
 
 ================================================================================
@@ -10,7 +10,7 @@ Spec: claimdesk-injury-extension-INSTRUCTIONS-2026-07-03.md
 [PASS] IX-05   motor hash stable (3964e668) across PL mutation; PL hash changed (dc824c35 → bd575523)
 [PASS] IX-06   PL scenario signed-then-mutated → stale-signoff (sign-off bound to content)
 [PASS] IX-07   3 trees, 3 distinct hashes: ['3964e668', 'dc824c35', '4e3fe60a']
-[PASS] IX-08   all 6 scenario-id → claim_type routes correct
+[PASS] IX-08   all 10 scenario-id → (state, claim_type) routes correct
 [PASS] IX-09   all 4 new triggers (serious-injury, workers-comp, govt-defendant, limitation) fire
 [PASS] IX-10   motor intake without claim_type → s1-rear-end, band='likely' (tree signed 2026-07-05)
 [PASS] IX-11   all 7 PD scenarios → unsigned-scenario (across 10 collision-type aliases, via patched unsigned tree)
@@ -18,7 +18,15 @@ Spec: claimdesk-injury-extension-INSTRUCTIONS-2026-07-03.md
 [PASS] IX-13   esc-uninsured-driver fires for yes/unsure, not for 'no'
 [PASS] IX-14   PD hash changed (1f13feba → 72c88661); motor/PL/med-neg hashes stable
 [PASS] IX-15   signed PD bands deterministically: clear=likely, following=possible, other=unclear
-[PASS] IX-16   4 trees registered, 4 distinct hashes, PD routing correct (hashes: ['3964e668', '1f13feba', 'dc824c35', '4e3fe60a'])
+[PASS] IX-16   4 NSW trees registered, 4 distinct hashes, PD routing correct (hashes: ['3964e668', '1f13feba', 'dc824c35', '4e3fe60a'])
 [PASS] IX-17   motor behavior unchanged by PD addition (s1→band='likely' (signed), s5 resolves as before)
+[PASS] IX-18   VIC PD collision types route to vic-pdN scenario ids (state-prefixed)
+[PASS] IX-19   all 7 VIC PD collision types → unsigned-scenario, no band (G-PROD-LOCK holds)
+[PASS] IX-20   VIC PD collision types × {minor,serious} → esc-injury, no band (firewall holds across states)
+[PASS] IX-21   VIC PD hash changed (5ebd4117 → 6a37acb6); all 4 NSW hashes stable (['3964e668', '1f13feba', 'dc824c35', '4e3fe60a'])
+[PASS] IX-22   SA/TAS/ACT/NT PD → state-scope; VIC/QLD/WA motor → state-scope (PD-only multi-state)
+[PASS] IX-23   QLD/WA PD collision types route to state-prefixed scenario ids
+[PASS] IX-24   all 7 QLD + 7 WA PD collision types → unsigned-scenario, no band
+[PASS] IX-25   QLD mutation isolated; 4 PD state hashes distinct (['1f13feba', '5ebd4117', 'c6092790', 'fc61fc3e'])
 ================================================================================
-TOTAL: 17  PASS: 17  FAIL: 0
+TOTAL: 25  PASS: 25  FAIL: 0

@@ -145,6 +145,8 @@ RULE_TREE_REGISTRY: dict[tuple[str, str], str] = {
     ("NSW", "public_liability"): "rule-tree.nsw.pl.v1.json",
     ("NSW", "medical_negligence"): "rule-tree.nsw.medneg.v1.json",
     ("VIC", "property_damage"): "rule-tree.vic.pd.v1.json",   # unsigned; escalates by G-PROD-LOCK
+    ("QLD", "property_damage"): "rule-tree.qld.pd.v1.json",   # unsigned
+    ("WA", "property_damage"): "rule-tree.wa.pd.v1.json",     # unsigned
 }
 ```
 
@@ -187,18 +189,19 @@ hashes the tree in isolation). `sign_rule_trees.py --tree` accepts a
 
 ## 8. First deliverable (this session)
 
-Engineering scaffolding only, with VIC as proof:
+Engineering scaffolding only, with VIC as proof, then QLD + WA:
 
 1. The plan doc (this file).
-2. `rule-tree.vic.pd.v1.json` — copy of NSW PD with VIC citations, **all scenarios unsigned**.
+2. `rule-tree.vic.pd.v1.json` / `qld.pd.v1.json` / `wa.pd.v1.json` — NSW PD clones with state citations, **all scenarios unsigned**.
 3. Engine refactor: `RULE_TREE_REGISTRY` keyed by `(state, claim_type)`; `_resolve_scenario` and `_load_rule_tree_for` take `state`.
-4. `sign_rule_trees.py` accepts `(state, claim_type)` selectors; `--verify` covers all registered trees.
-5. ≥2 VIC acceptance tests proving unsigned → `unsigned-scenario` escalation.
-6. `00-INDEX.md` Item 2d gets a VIC placeholder row marked `[PENDING — LEGAL]`.
-7. NSW suite still 86/86 green; NSW hashes unchanged.
+4. Intake state dropdown accepts NSW/VIC/QLD/WA for motor+PD; `outside_nsw` and unregistered states still escalate (G-21).
+5. `sign_rule_trees.py` accepts `(state, claim_type)` selectors; `--verify` covers all registered trees.
+6. Acceptance tests IX-18..25: VIC/QLD/WA routing + unsigned escalation + hash isolation; SA/TAS/ACT/NT → `state-scope`.
+7. `00-INDEX.md` items 2d-VIC / 2d-QLD / 2d-WA marked `[PENDING — LEGAL]`.
+8. NSW suite green; NSW hashes unchanged.
 
-No VIC band will ship until Legal Head signs the VIC tree.
+No VIC/QLD/WA band will ship until Legal Head signs that state's tree.
 
 ---
 
-*Prepared 2026-07-13. Each state = (engineering scaffold + legal sign-off). Engineering is reusable; sign-off is per-state.*
+*Prepared 2026-07-13; QLD+WA scaffold continued same day. Each state = (engineering scaffold + legal sign-off). Engineering is reusable; sign-off is per-state.*

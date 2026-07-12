@@ -274,6 +274,8 @@ def _test_claim_type_routing() -> tuple[bool, str]:
         "mn4-birth-injury": ("NSW", "medical_negligence"),
         "pd1-rear-end": ("NSW", "property_damage"),
         "vic-pd1-rear-end": ("VIC", "property_damage"),
+        "qld-pd1-rear-end": ("QLD", "property_damage"),
+        "wa-pd1-rear-end": ("WA", "property_damage"),
     }
     bad = [(sid, want, _claim_type_for_scenario_id(sid))
            for sid, want in checks.items()
@@ -473,8 +475,8 @@ def _test_pd_routing_and_registry_four_trees() -> tuple[bool, str]:
     trees with distinct hashes. Updates IX-07/IX-08 for the 4-NSW-tree world.
 
     Multi-state note (per MULTI-STATE-ROLLOUT-PLAN.md): the registry now also
-    contains a VIC PD entry (5 trees total), but that is a separate concern
-    tested by IX-18/IX-19/IX-20. This case only verifies the NSW core."""
+    contains VIC/QLD/WA PD entries (7 trees total), but that is a separate
+    concern tested by IX-18..26. This case only verifies the NSW core."""
     # Routing (state, claim_type)
     route_checks = {
         "pd1-rear-end": ("NSW", "property_damage"),
@@ -633,21 +635,97 @@ def _test_vic_pd_hash_isolation() -> tuple[bool, str]:
 
 
 def _test_unregistered_state_escalates() -> tuple[bool, str]:
-    """A state with no registered tree (e.g. QLD today) must escalate as
-    state-scope, not produce a band. This preserves the original G-21 behaviour
-    for any state we haven't rolled out yet."""
-    er = classify({"state": "QLD", "claim_type": "property_damage",
-                   "collision_type": "rear-end", "injuries": "none"})
-    if er.escalation != "state-scope":
-        return False, f"QLD PD intake: expected state-scope, got escalation={er.escalation!r} band={er.band!r}"
-    if er.band is not None:
-        return False, f"QLD PD intake emitted band={er.band!r} (forbidden — QLD not registered)"
-    # Same for motor in VIC (VIC only has PD registered, no motor tree).
-    er2 = classify({"state": "VIC", "claim_type": "motor",
-                    "accident_type": "rear-end", "injuries": "none"})
-    if er2.escalation != "state-scope":
-        return False, f"VIC motor intake: expected state-scope (no VIC motor tree), got {er2.escalation!r}"
-    return True, "QLD PD → state-scope; VIC motor → state-scope (only VIC PD is registered)"
+    """A state with no registered PD tree (e.g. SA/TAS today) must escalate as
+    state-scope, not produce a band. Motor in VIC/QLD/WA also has no tree and
+    must escalate the same way. Preserves G-21 for states we haven't rolled out."""
+    for st in ("SA", "TAS", "ACT", "NT"):
+        er = classify({"state": st, "claim_type": "property_damage",
+                       "collision_type": "rear-end", "injuries": "none"})
+        if er.escalation != "state-scope":
+            return False, (f"{st} PD intake: expected state-scope, "
+                           f"got escalation={er.escalation!r} band={er.band!r}")
+        if er.band is not None:
+            return False, f"{st} PD intake emitted band={er.band!r} (forbidden)"
+    # Motor in registered PD states still has no motor tree → state-scope.
+    for st in ("VIC", "QLD", "WA"):
+        er2 = classify({"state": st, "claim_type": "motor",
+                        "accident_type": "rear-end", "injuries": "none"})
+        if er2.escalation != "state-scope":
+            return False, (f"{st} motor intake: expected state-scope "
+                           f"(no {st} motor tree), got {er2.escalation!r}")
+    return True, ("SA/TAS/ACT/NT PD → state-scope; "
+                  "VIC/QLD/WA motor → state-scope (PD-only multi-state)")
+
+
+def _test_qld_wa_pd_routing() -> tuple[bool, str]:
+    """QLD and WA PD intakes route to state-prefixed scenario ids (qld-pdN / wa-pdN)."""
+    checks = [
+        ("QLD", "rear-end", "qld-pd1-rear-end"),
+        ("QLD", "reversing", "qld-pd3-reversing"),
+        ("QLD", "other", "qld-pd7-other"),
+        ("WA", "rear-end", "wa-pd1-rear-end"),
+        ("WA", "parked_hit", "wa-pd4-parked-vehicle-struck"),
+        ("WA", "car_park", "wa-pd6-car-park"),
+    ]
+    for st, col, expected in checks:
+        sid = _resolve_scenario({
+            "state": st, "claim_type": "property_damage",
+            "collision_type": col, "injuries": "none",
+        })
+        if sid != expected:
+            return False, f"{st} {col!r} routed to {sid!r}, expected {expected!r}"
+    return True, "QLD/WA PD collision types route to state-prefixed scenario ids"
+
+
+def _test_qld_wa_pd_unsigned_escalates() -> tuple[bool, str]:
+    """Every QLD and WA PD scenario ships UNSIGNED, so classify must escalate
+    as unsigned-scenario with no band (G-PROD-LOCK) until Legal Head signs."""
+    violations = []
+    for st in ("QLD", "WA"):
+        for col in ("rear-end", "give_way", "reversing", "parked_hit",
+                    "lane_change", "car_park", "other"):
+            er = classify({"state": st, "claim_type": "property_damage",
+                           "collision_type": col, "injuries": "none"})
+            if er.escalation != "unsigned-scenario":
+                violations.append(
+                    f"{st}/{col}: expected unsigned-scenario, "
+                    f"got escalation={er.escalation!r} band={er.band!r}")
+            if er.band is not None:
+                violations.append(f"{st}/{col}: emitted band={er.band!r} (forbidden)")
+    if violations:
+        return False, "; ".join(violations)
+    return True, "all 7 QLD + 7 WA PD collision types → unsigned-scenario, no band"
+
+
+def _test_qld_wa_pd_hash_isolation() -> tuple[bool, str]:
+    """Mutating QLD or WA PD must not change NSW or VIC hashes. Each state's
+    PD tree has its own distinct content-bound hash."""
+    keys = [
+        ("NSW", "motor"), ("NSW", "property_damage"),
+        ("NSW", "public_liability"), ("NSW", "medical_negligence"),
+        ("VIC", "property_damage"), ("QLD", "property_damage"), ("WA", "property_damage"),
+    ]
+    before = {k: _compute_scenarios_hash(_load_rule_tree_for(k[1], k[0])) for k in keys}
+
+    import copy
+    qld_mut = copy.deepcopy(_load_rule_tree_for("property_damage", "QLD"))
+    qld_mut["scenarios"][0]["_test_mutation"] = "cosmetic-qld-change"
+    qld_mut_hash = _compute_scenarios_hash(qld_mut)
+    if qld_mut_hash == before[("QLD", "property_damage")]:
+        return False, "QLD hash did NOT change after mutation"
+
+    after = {k: _compute_scenarios_hash(_load_rule_tree_for(k[1], k[0])) for k in keys}
+    for k in keys:
+        if before[k] != after[k]:
+            return False, f"{k[0]}.{k[1]} hash changed across QLD mutation (isolation broken)"
+
+    # All PD state hashes must be pairwise distinct (different citations/ids).
+    pd_hashes = [before[("NSW", "property_damage")], before[("VIC", "property_damage")],
+                 before[("QLD", "property_damage")], before[("WA", "property_damage")]]
+    if len(set(pd_hashes)) != 4:
+        return False, f"PD state hashes not distinct: {[h[:8] for h in pd_hashes]}"
+    return True, (f"QLD mutation isolated; 4 PD state hashes distinct "
+                  f"({[h[:8] for h in pd_hashes]})")
 
 
 # -----------------------------------------------------------------------
@@ -673,12 +751,15 @@ CASES: list[tuple[str, Callable[[], tuple[bool, str]]]] = [
     ("IX-15", _test_pd_signed_bands_deterministically),
     ("IX-16", _test_pd_routing_and_registry_four_trees),
     ("IX-17", _test_pd_backward_compat_motor_unchanged),
-    # Multi-state (per MULTI-STATE-ROLLOUT-PLAN.md) — VIC PD as proof state.
+    # Multi-state — VIC PD proof, then QLD + WA scaffold.
     ("IX-18", _test_vic_pd_routing),
     ("IX-19", _test_vic_pd_unsigned_escalates),
     ("IX-20", _test_vic_pd_injury_firewall),
     ("IX-21", _test_vic_pd_hash_isolation),
     ("IX-22", _test_unregistered_state_escalates),
+    ("IX-23", _test_qld_wa_pd_routing),
+    ("IX-24", _test_qld_wa_pd_unsigned_escalates),
+    ("IX-25", _test_qld_wa_pd_hash_isolation),
 ]
 
 

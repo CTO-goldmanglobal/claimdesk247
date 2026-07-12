@@ -1,9 +1,9 @@
 STAGE 2.5 ACCEPTANCE TEST REPORT (Engine-as-Endpoint)
-Generated: 2026-07-04T20:22:27.588195Z
+Generated: 2026-07-12T16:29:24.074700Z
 Suite: acceptance-tests.stage25.yaml
 Mode: local (TestClient)
-Stage 2 regression: /Users/finn/Smash repair Engine/stage-2/tests/run_acceptance.py
-Stage 3 regression: /Users/finn/Smash repair Engine/stage-3/tests/run_acceptance.py
+Stage 2 regression: /Volumes/Goldman Global/businesses/claimdesk247/stage-2/tests/run_acceptance.py
+Stage 3 regression: /Volumes/Goldman Global/businesses/claimdesk247/stage-3/tests/run_acceptance.py
 
 ================================================================================
 [PASS] T-25-001   gate=G-41   band=likely (matches engine)
@@ -13,7 +13,7 @@ Stage 3 regression: /Users/finn/Smash repair Engine/stage-3/tests/run_acceptance
 [PASS] T-25-005   gate=G-43   esc-injury short-circuits with no band, terminal=True
 [PASS] T-25-006   gate=G-43   esc-multiparty short-circuits with no band
 [PASS] T-25-007   gate=G-44   full intake used opaque reference only; PII never in URL
-[PASS] T-25-008   gate=G-44   PDF served via opaque ref GF-58E7D86A
+[PASS] T-25-008   gate=G-44   PDF served via opaque ref GF-577BC20F
 [PASS] T-25-009   gate=G-45   customer -> 403 (server-side enforced)
 [PASS] T-25-010   gate=G-45   legal_staff -> 200, all 8 brief fields present
 [PASS] T-25-011   gate=G-46   deterministic ref in test mode: GF-6CF7B73B
@@ -28,4 +28,4 @@ Stage 3 regression: /Users/finn/Smash repair Engine/stage-3/tests/run_acceptance
 ================================================================================
 TOTAL: 19  PASS: 19  FAIL: 0
 
-All tests green. Report written to /Users/finn/Smash repair Engine/stage-2.5/deliverables/test-report.txt
+All tests green. Report written to /Volumes/Goldman Global/businesses/claimdesk247/stage-2.5/deliverables/test-report.txt

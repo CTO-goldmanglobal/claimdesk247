@@ -1,0 +1,727 @@
+{
+  "$comment": "ClaimDesk 247 — Property Damage (Third-Party Motor) sub-tree (WA) v1. STAGING-UNSIGNED. Per MULTI-STATE-ROLLOUT-PLAN.md: every scenario ships without legal_signoff so G-PROD-LOCK escalates every WA PD intake as 'unsigned-scenario' until Legal Head signs. Governing frame: common-law negligence + Arsalan v Rixon; Nguyen v Cassim [2021] HCA 274 CLR 606 (federal/HCA). Road rules: Road Traffic Code 2000 (WA). Limitation: Limitation Act 2005 (WA) — 6 years for tort. NOT the Motor Vehicle (Third Party Insurance) Act 1943 (WA) CTP scheme (Lane 2). Confirm PD-only exemption from any WA touting/claim-farming regime in CD-R2 memo before sign-off. Injury firewall: any injury → esc-injury → law-firm partner. Band enum: likely|possible|unclear|insufficient.",
+  "version": "1.0.0-wa-staging-unsigned",
+  "jurisdiction": "WA",
+  "claim_type": "property_damage",
+  "governing_law": "Common law negligence (liability) + Arsalan v Rixon; Nguyen v Cassim [2021] HCA 274 CLR 606 (like-for-like hire/recovery). NOT the Motor Vehicle (Third Party Insurance) Act 1943 (WA) CTP scheme (Lane 2). Limitation: Limitation Act 2005 (WA) — 6 years for tort.",
+  "spec_change": "v1.0.0-wa-staging-unsigned — Initial WA PD sub-tree, cloned from rule-tree.vic.pd.v1.json / NSW PD with WA road-rule labels and limitation wording. ALL scenarios unsigned.",
+  "builder": "Cursor (Mac Studio, multi-state scaffold, 2026-07-13)",
+  "build_date": "2026-07-13",
+  "source_clone_of": "rule-tree.vic.pd.v1.json",
+  "global_escalation_triggers": [
+    {
+      "id": "esc-injury",
+      "condition": "ANY injury mentioned — hard firewall to PI pathway → law-firm partner. Never monetized per-referral. This is the red line (injury firewall, in every state).",
+      "applicability": "property_damage"
+    },
+    {
+      "id": "esc-fraud",
+      "condition": "story inconsistency, rego mismatch",
+      "applicability": "property_damage"
+    },
+    {
+      "id": "esc-dispute",
+      "condition": "customer disputes the AI's summary",
+      "applicability": "property_damage"
+    },
+    {
+      "id": "esc-multiparty",
+      "condition": "3+ vehicles in chain",
+      "applicability": "property_damage"
+    },
+    {
+      "id": "esc-advice",
+      "condition": "customer asks for legal advice directly",
+      "applicability": "property_damage"
+    },
+    {
+      "id": "esc-uninsured-driver",
+      "condition": "at-fault driver uninsured or unsure — routes to human (WA roadside / separate pathway)",
+      "applicability": "property_damage"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "wa-pd1-rear-end",
+      "name": "Rear-end collision (not at fault) — WA",
+      "status": "DRAFT_FOR_LEGAL_SIGNOFF",
+      "rule_citations": [
+        {
+          "rule": "Road Traffic Code 2000 (WA) r126",
+          "title": "Keeping a safe distance behind vehicles"
+        },
+        {
+          "rule": "Arsalan v Rixon; Nguyen v Cassim [2021] HCA 274 CLR 606",
+          "title": "Not-at-fault owner's entitlement to like-for-like hire including loss of amenity/enjoyment"
+        }
+      ],
+      "classification_questions": [
+        {
+          "id": "wa-pd1-q1",
+          "slot": "user_position",
+          "question_web": "In the collision, your vehicle was:",
+          "answer_type": "enum",
+          "options": [
+            "front",
+            "behind",
+            "middle_of_chain"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "wa-pd1-q2",
+          "slot": "user_motion",
+          "question_web": "Just before impact, your vehicle was:",
+          "answer_type": "enum",
+          "options": [
+            "stopped",
+            "moving",
+            "slowing"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "wa-pd1-q3",
+          "slot": "chain_count",
+          "question_web": "How many vehicles were involved altogether?",
+          "answer_type": "integer",
+          "validation": ">=2; if >=3 route to esc-multiparty",
+          "reprompt_max": 2
+        }
+      ],
+      "default_pattern": {
+        "description": "Following driver responsible for safe gap (RTC r126); not-at-fault front driver recovers repairs + like-for-like hire (Arsalan)",
+        "favours": "front_vehicle_recovery"
+      },
+      "exceptions": [
+        {
+          "id": "wa-pd1-e1",
+          "probe_question": "Did the vehicle in front brake suddenly without apparent reason?",
+          "slot": "sudden_braking",
+          "effect": "downgrade_band"
+        },
+        {
+          "id": "wa-pd1-e2",
+          "probe_question": "Were the front vehicle's brake lights working?",
+          "slot": "brake_lights",
+          "effect": "downgrade_band"
+        },
+        {
+          "id": "wa-pd1-e3",
+          "probe_question": "Did the vehicle in front reverse into you?",
+          "slot": "front_reversed",
+          "effect": "flag_unclear"
+        }
+      ],
+      "damage_consistency_check": {
+        "expected": "rear damage on front vehicle AND front damage on rear vehicle",
+        "on_mismatch": "band cannot exceed 'unclear'"
+      },
+      "band_logic": [
+        {
+          "when": "user was the front/stopped vehicle, no exceptions, damage consistent",
+          "band": "likely"
+        },
+        {
+          "when": "1+ downgrade exception (sudden braking / brake lights)",
+          "band": "possible"
+        },
+        {
+          "when": "flag_unclear exception OR damage inconsistent",
+          "band": "unclear"
+        },
+        {
+          "when": "classification incomplete after reprompts",
+          "band": "insufficient"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "likely",
+          "text_web": "In a rear-end collision in Western Australia, the following driver is responsible for keeping a safe distance (Road Traffic Code 2000 r126). Based on what you've described, the other driver appears liable for the damage to your vehicle, which means their insurer should cover your repairs, towing, and a like-for-like replacement vehicle for the period you're without yours (Arsalan v Rixon, High Court of Australia). We can run that recovery for you. {{ATTACH:master}}"
+        },
+        {
+          "band": "possible",
+          "text_web": "Your rear-end matter looks recoverable, but something you've described (such as sudden braking or a brake-light issue) can affect how the liability is assessed. We'll review the details and tell you honestly whether recovery is worth running. {{ATTACH:master}}"
+        },
+        {
+          "band": "unclear",
+          "text_web": "The circumstances of your rear-end collision don't fit the standard pattern neatly — the damage locations or sequence raise questions. This is exactly the kind of matter a person should have reviewed properly before accepting the insurer's first offer. {{ATTACH:master}}"
+        },
+        {
+          "band": "insufficient",
+          "text_web": "There isn't enough detail yet to assess your matter. Tell us a bit more and we'll review it. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": []
+    },
+    {
+      "id": "wa-pd2-failure-to-give-way",
+      "name": "Failure to give way (T-intersection / give-way sign) — WA",
+      "status": "DRAFT_FOR_LEGAL_SIGNOFF",
+      "rule_citations": [
+        {
+          "rule": "Road Traffic Code 2000 (WA) r72",
+          "title": "Giving way at an intersection with a give way sign or line"
+        },
+        {
+          "rule": "Road Traffic Code 2000 (WA) r73",
+          "title": "Giving way at a T-intersection"
+        },
+        {
+          "rule": "Arsalan v Rixon [2021] HCA",
+          "title": "Like-for-like hire entitlement for the not-at-fault driver"
+        }
+      ],
+      "classification_questions": [
+        {
+          "id": "wa-pd2-q1",
+          "slot": "road_layout",
+          "question_web": "The intersection was:",
+          "answer_type": "enum",
+          "options": [
+            "give_way_sign_or_line",
+            "t_intersection",
+            "stop_sign",
+            "unmarked"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "wa-pd2-q2",
+          "slot": "user_road_type",
+          "question_web": "Your vehicle was on:",
+          "answer_type": "enum",
+          "options": [
+            "terminating_road",
+            "through_road",
+            "unsure"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "wa-pd2-q3",
+          "slot": "sight_lines",
+          "question_web": "How were the sight lines?",
+          "answer_type": "enum",
+          "options": [
+            "clear",
+            "obstructed",
+            "disputed"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        }
+      ],
+      "default_pattern": {
+        "description": "Vehicle on the terminating road / facing give-way must give way (RTC r72/73)",
+        "favours": "through_vehicle_recovery"
+      },
+      "exceptions": [
+        {
+          "id": "wa-pd2-e1",
+          "probe_question": "Was it a simultaneous entry (both moving into the conflict at the same time)?",
+          "slot": "simultaneous_entry",
+          "effect": "flag_unclear"
+        }
+      ],
+      "damage_consistency_check": {
+        "expected": "front damage on terminating-road vehicle; side damage on through-road vehicle",
+        "on_mismatch": "band cannot exceed 'unclear'"
+      },
+      "band_logic": [
+        {
+          "when": "user on through road, no exceptions, damage consistent",
+          "band": "likely"
+        },
+        {
+          "when": "sight lines obstructed",
+          "band": "possible"
+        },
+        {
+          "when": "simultaneous entry OR damage inconsistent",
+          "band": "unclear"
+        },
+        {
+          "when": "incomplete",
+          "band": "insufficient"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "likely",
+          "text_web": "At a give-way or T-intersection in Western Australia, the driver entering or terminating must give way to through traffic (Road Traffic Code 2000 rr72-73). Based on your description, the other driver appears liable, and their insurer should cover your repairs and a like-for-like replacement vehicle (Arsalan v Rixon). We can run that recovery. {{ATTACH:master}}"
+        },
+        {
+          "band": "possible",
+          "text_web": "Your intersection matter may be recoverable, but the visibility or sequencing can affect the assessment. We'll review the details honestly before running it. {{ATTACH:master}}"
+        },
+        {
+          "band": "unclear",
+          "text_web": "It isn't clear who had right of way in your matter — for example, both vehicles may have entered the conflict simultaneously. This should be reviewed before you accept any insurer offer. {{ATTACH:master}}"
+        },
+        {
+          "band": "insufficient",
+          "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": []
+    },
+    {
+      "id": "wa-pd3-reversing",
+      "name": "Reversing collision — WA",
+      "status": "DRAFT_FOR_LEGAL_SIGNOFF",
+      "rule_citations": [
+        {
+          "rule": "Road Traffic Code 2000 (WA) r96",
+          "title": "Driver must not reverse unless safe"
+        },
+        {
+          "rule": "Arsalan v Rixon [2021] HCA",
+          "title": "Like-for-like hire entitlement for the not-at-fault driver"
+        }
+      ],
+      "classification_questions": [
+        {
+          "id": "wa-pd3-q1",
+          "slot": "user_action",
+          "question_web": "What was your vehicle doing?",
+          "answer_type": "enum",
+          "options": [
+            "reversing",
+            "stationary",
+            "moving_forward",
+            "parked"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "wa-pd3-q2",
+          "slot": "other_vehicle_state",
+          "question_web": "What was the other vehicle doing?",
+          "answer_type": "enum",
+          "options": [
+            "reversing",
+            "stationary",
+            "moving_forward",
+            "parked"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "wa-pd3-q3",
+          "slot": "location_type",
+          "question_web": "Where did it happen?",
+          "answer_type": "enum",
+          "options": [
+            "road",
+            "car_park",
+            "driveway",
+            "other"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        }
+      ],
+      "default_pattern": {
+        "description": "Reversing driver must ensure it's safe (RTC r96)",
+        "favours": "non_reversing_vehicle_recovery"
+      },
+      "exceptions": [
+        {
+          "id": "wa-pd3-e1",
+          "probe_question": "Were both vehicles moving at the time?",
+          "slot": "both_moving",
+          "effect": "flag_unclear"
+        }
+      ],
+      "damage_consistency_check": {
+        "expected": "rear damage on reversing vehicle",
+        "on_mismatch": "band cannot exceed 'unclear'"
+      },
+      "band_logic": [
+        {
+          "when": "other vehicle reversing, user stationary/forward, no exceptions",
+          "band": "likely"
+        },
+        {
+          "when": "both moving",
+          "band": "unclear"
+        },
+        {
+          "when": "user reversing",
+          "band": "possible"
+        },
+        {
+          "when": "incomplete",
+          "band": "insufficient"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "likely",
+          "text_web": "A reversing driver must make sure it's safe before reversing (Road Traffic Code 2000 r96). Based on your description, the other driver appears liable for the damage to your vehicle, and their insurer should cover your repairs and a like-for-like replacement vehicle (Arsalan v Rixon). We can run that recovery. {{ATTACH:master}}"
+        },
+        {
+          "band": "possible",
+          "text_web": "Your reversing-collision matter may be recoverable but the shared movement can affect the assessment. We'll review honestly before running it. {{ATTACH:master}}"
+        },
+        {
+          "band": "unclear",
+          "text_web": "It isn't clear who was at fault in your reversing matter — for example, both vehicles may have been moving. This should be reviewed before you accept any insurer offer. {{ATTACH:master}}"
+        },
+        {
+          "band": "insufficient",
+          "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": []
+    },
+    {
+      "id": "wa-pd4-parked-vehicle-struck",
+      "name": "Parked/stationary vehicle struck — WA",
+      "status": "DRAFT_FOR_LEGAL_SIGNOFF",
+      "rule_citations": [
+        {
+          "rule": "Road Traffic Code 2000 (WA) r96",
+          "title": "Driver must not reverse unless safe"
+        },
+        {
+          "rule": "Road Traffic Code 2000 (WA) r200",
+          "title": "Moving/slow driving not permitted in various contexts"
+        },
+        {
+          "rule": "Arsalan v Rixon [2021] HCA",
+          "title": "Like-for-like hire entitlement for the not-at-fault driver"
+        }
+      ],
+      "classification_questions": [
+        {
+          "id": "wa-pd4-q1",
+          "slot": "pv_user_motion",
+          "question_web": "Was your vehicle parked/stationary or moving when it was hit?",
+          "answer_type": "enum",
+          "options": [
+            "parked_stationary",
+            "just_stopped",
+            "moving"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "wa-pd4-q2",
+          "slot": "pv_parking_legal",
+          "question_web": "Were you parked legally?",
+          "answer_type": "enum",
+          "options": [
+            "yes",
+            "no",
+            "unsure"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        }
+      ],
+      "default_pattern": {
+        "description": "Moving vehicle that strikes a lawfully parked vehicle is liable",
+        "favours": "parked_vehicle_recovery"
+      },
+      "exceptions": [
+        {
+          "id": "wa-pd4-e1",
+          "probe_question": "Were you parked illegally or obstructing traffic?",
+          "slot": "pv_parking_illegal",
+          "effect": "downgrade_band"
+        }
+      ],
+      "damage_consistency_check": {
+        "expected": "any consistent profile; parked vehicle often struck on side/rear",
+        "on_mismatch": "band cannot exceed 'unclear'"
+      },
+      "band_logic": [
+        {
+          "when": "parked/stationary, legally parked, no exceptions",
+          "band": "likely"
+        },
+        {
+          "when": "parked illegally / obstructing",
+          "band": "possible"
+        },
+        {
+          "when": "moving when struck OR unsure",
+          "band": "unclear"
+        },
+        {
+          "when": "incomplete",
+          "band": "insufficient"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "likely",
+          "text_web": "When a moving vehicle strikes a lawfully parked vehicle in Western Australia, the moving driver is liable for the damage. Based on your description, the other driver appears liable, and their insurer should cover your repairs and a like-for-like replacement vehicle (Arsalan v Rixon). We can run that recovery. {{ATTACH:master}}"
+        },
+        {
+          "band": "possible",
+          "text_web": "Your parked-vehicle matter may be recoverable, but where the vehicle was parked illegally or obstructing traffic can reduce what's recoverable. We'll review honestly before running it. {{ATTACH:master}}"
+        },
+        {
+          "band": "unclear",
+          "text_web": "It isn't clear whether your vehicle was lawfully parked at the time. This should be reviewed before you accept any insurer offer. {{ATTACH:master}}"
+        },
+        {
+          "band": "insufficient",
+          "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": []
+    },
+    {
+      "id": "wa-pd5-changing-lanes-sideswipe",
+      "name": "Changing lanes / sideswipe (same direction) — WA",
+      "status": "DRAFT_FOR_LEGAL_SIGNOFF",
+      "rule_citations": [
+        {
+          "rule": "Road Traffic Code 2000 (WA) r148",
+          "title": "Giving way when moving from one marked lane to another"
+        },
+        {
+          "rule": "Arsalan v Rixon [2021] HCA",
+          "title": "Like-for-like hire entitlement for the not-at-fault driver"
+        }
+      ],
+      "classification_questions": [
+        {
+          "id": "wa-pd5-q1",
+          "slot": "ss_user_lane",
+          "question_web": "Were you holding your lane or changing lanes?",
+          "answer_type": "enum",
+          "options": [
+            "holding_lane",
+            "changing_lane",
+            "unsure"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "wa-pd5-q2",
+          "slot": "ss_other_lane",
+          "question_web": "Was the other driver holding their lane or changing lanes?",
+          "answer_type": "enum",
+          "options": [
+            "holding_lane",
+            "changing_lane",
+            "unsure"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        }
+      ],
+      "default_pattern": {
+        "description": "Vehicle changing lanes must give way to the vehicle already in the lane (RTC r148)",
+        "favours": "lane_holding_vehicle_recovery"
+      },
+      "exceptions": [
+        {
+          "id": "wa-pd5-e1",
+          "probe_question": "Were both vehicles changing lanes at the same time?",
+          "slot": "ss_both_changing",
+          "effect": "flag_unclear"
+        }
+      ],
+      "damage_consistency_check": {
+        "expected": "side damage on both vehicles (sideswipe)",
+        "on_mismatch": "band cannot exceed 'unclear'"
+      },
+      "band_logic": [
+        {
+          "when": "user holding lane, other changing lanes, no exceptions",
+          "band": "likely"
+        },
+        {
+          "when": "user changing lanes",
+          "band": "possible"
+        },
+        {
+          "when": "both changing OR unsure",
+          "band": "unclear"
+        },
+        {
+          "when": "incomplete",
+          "band": "insufficient"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "likely",
+          "text_web": "When a driver changes lanes in Western Australia, they must give way to vehicles already in that lane (Road Traffic Code 2000 r148). Based on your description, the other driver appears liable for the damage to your vehicle, and their insurer should cover your repairs and a like-for-like replacement vehicle (Arsalan v Rixon). We can run that recovery. {{ATTACH:master}}"
+        },
+        {
+          "band": "possible",
+          "text_web": "Your lane-change matter may be recoverable, but shared lane movement can affect the assessment. We'll review honestly before running it. {{ATTACH:master}}"
+        },
+        {
+          "band": "unclear",
+          "text_web": "It isn't clear who changed lanes into whom in your matter. This should be reviewed before you accept any insurer offer. {{ATTACH:master}}"
+        },
+        {
+          "band": "insufficient",
+          "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": []
+    },
+    {
+      "id": "wa-pd6-car-park",
+      "name": "Car-park manoeuvre collision — WA",
+      "status": "DRAFT_FOR_LEGAL_SIGNOFF",
+      "rule_citations": [
+        {
+          "rule": "Road Traffic Code 2000 (WA) r96",
+          "title": "Driver must not reverse unless safe"
+        },
+        {
+          "rule": "Arsalan v Rixon [2021] HCA",
+          "title": "Like-for-like hire entitlement for the not-at-fault driver"
+        }
+      ],
+      "classification_questions": [
+        {
+          "id": "wa-pd6-q1",
+          "slot": "cp_user_role",
+          "question_web": "What were you doing in the car park?",
+          "answer_type": "enum",
+          "options": [
+            "driving_in_aisle",
+            "reversing_from_bay",
+            "entering_bay",
+            "stationary"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        },
+        {
+          "id": "wa-pd6-q2",
+          "slot": "cp_other_role",
+          "question_web": "What was the other driver doing?",
+          "answer_type": "enum",
+          "options": [
+            "driving_in_aisle",
+            "reversing_from_bay",
+            "entering_bay",
+            "stationary"
+          ],
+          "validation": "must be one option",
+          "reprompt_max": 2
+        }
+      ],
+      "default_pattern": {
+        "description": "Vehicle manoeuvring (reversing/entering bay) must give way to through aisle traffic",
+        "favours": "aisle_vehicle_recovery"
+      },
+      "exceptions": [
+        {
+          "id": "wa-pd6-e1",
+          "probe_question": "Was the aisle vehicle travelling too fast for the car park?",
+          "slot": "cp_aisle_too_fast",
+          "effect": "downgrade_band"
+        },
+        {
+          "id": "wa-pd6-e2",
+          "probe_question": "Were both vehicles manoeuvring at the same time?",
+          "slot": "cp_both_moving",
+          "effect": "flag_unclear"
+        }
+      ],
+      "damage_consistency_check": {
+        "expected": "varies — often side/front corner damage",
+        "on_mismatch": "band cannot exceed 'unclear'"
+      },
+      "band_logic": [
+        {
+          "when": "user in aisle, other manoeuvring, no exceptions",
+          "band": "likely"
+        },
+        {
+          "when": "aisle vehicle too fast",
+          "band": "possible"
+        },
+        {
+          "when": "both manoeuvring OR unsure",
+          "band": "unclear"
+        },
+        {
+          "when": "incomplete",
+          "band": "insufficient"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "likely",
+          "text_web": "In a car park in Western Australia, a driver reversing or entering a bay must give way to traffic in the aisle. Based on your description, the other driver appears liable for the damage to your vehicle, and their insurer should cover your repairs and a like-for-like replacement vehicle (Arsalan v Rixon). We can run that recovery. {{ATTACH:master}}"
+        },
+        {
+          "band": "possible",
+          "text_web": "Your car-park matter may be recoverable, but speed or shared movement can affect the assessment. We'll review honestly before running it. {{ATTACH:master}}"
+        },
+        {
+          "band": "unclear",
+          "text_web": "It isn't clear who had right of way in your car-park matter. This should be reviewed before you accept any insurer offer. {{ATTACH:master}}"
+        },
+        {
+          "band": "insufficient",
+          "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": []
+    },
+    {
+      "id": "wa-pd7-other",
+      "name": "Other collision type (catch-all) — WA",
+      "status": "ESCALATION_ONLY",
+      "rule_citations": [
+        {
+          "rule": "Arsalan v Rixon [2021] HCA",
+          "title": "Like-for-like hire entitlement for the not-at-fault driver"
+        }
+      ],
+      "classification_questions": [],
+      "default_pattern": {
+        "description": "Catch-all — routes to human review; no auto-band",
+        "favours": "unclear"
+      },
+      "exceptions": [],
+      "damage_consistency_check": {
+        "expected": "n/a",
+        "on_mismatch": "n/a"
+      },
+      "band_logic": [
+        {
+          "when": "always",
+          "band": "unclear",
+          "note": "catch-all — escalate"
+        }
+      ],
+      "outputs": [
+        {
+          "band": "unclear",
+          "text_web": "Your matter doesn't fit a standard collision pattern, so we won't guess. The details you've given will go to a person to review properly before you accept any insurer offer. {{ATTACH:master}}"
+        }
+      ],
+      "escalation_overrides": [
+        {
+          "condition": "always",
+          "action": "route_to_human"
+        }
+      ]
+    }
+  ]
+}
