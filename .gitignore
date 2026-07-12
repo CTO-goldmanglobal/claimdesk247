@@ -50,6 +50,10 @@ handoff/WEEKEND-AUDIT-2026-06-20.md
 /LOOP-GATE-COMPLETENESS-REVIEW.md
 /LOOP-OPERATING-RULES.md
 
+# Local Python virtualenv (per-machine, never committed)
+.venv/
+venv/
+
 # Local notes
 *.local
 scratch/
