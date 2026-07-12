@@ -276,6 +276,10 @@ def _test_claim_type_routing() -> tuple[bool, str]:
         "vic-pd1-rear-end": ("VIC", "property_damage"),
         "qld-pd1-rear-end": ("QLD", "property_damage"),
         "wa-pd1-rear-end": ("WA", "property_damage"),
+        "sa-pd1-rear-end": ("SA", "property_damage"),
+        "tas-pd1-rear-end": ("TAS", "property_damage"),
+        "act-pd1-rear-end": ("ACT", "property_damage"),
+        "nt-pd1-rear-end": ("NT", "property_damage"),
     }
     bad = [(sid, want, _claim_type_for_scenario_id(sid))
            for sid, want in checks.items()
@@ -475,8 +479,9 @@ def _test_pd_routing_and_registry_four_trees() -> tuple[bool, str]:
     trees with distinct hashes. Updates IX-07/IX-08 for the 4-NSW-tree world.
 
     Multi-state note (per MULTI-STATE-ROLLOUT-PLAN.md): the registry now also
-    contains VIC/QLD/WA PD entries (7 trees total), but that is a separate
-    concern tested by IX-18..26. This case only verifies the NSW core."""
+    contains PD entries for every Australian jurisdiction (11 trees total:
+    4 NSW + 7 non-NSW PD), tested by IX-18..27. This case only verifies the
+    NSW core."""
     # Routing (state, claim_type)
     route_checks = {
         "pd1-rear-end": ("NSW", "property_damage"),
@@ -635,10 +640,10 @@ def _test_vic_pd_hash_isolation() -> tuple[bool, str]:
 
 
 def _test_unregistered_state_escalates() -> tuple[bool, str]:
-    """A state with no registered PD tree (e.g. SA/TAS today) must escalate as
-    state-scope, not produce a band. Motor in VIC/QLD/WA also has no tree and
-    must escalate the same way. Preserves G-21 for states we haven't rolled out."""
-    for st in ("SA", "TAS", "ACT", "NT"):
+    """Non-AU / unknown states escalate as state-scope. Motor outside NSW has
+    no motor tree and must also escalate. All AU PD states are registered
+    (unsigned until Legal Head pre-launch sign-off)."""
+    for st in ("outside_nsw", "NZ", "OTHER"):
         er = classify({"state": st, "claim_type": "property_damage",
                        "collision_type": "rear-end", "injuries": "none"})
         if er.escalation != "state-scope":
@@ -646,15 +651,15 @@ def _test_unregistered_state_escalates() -> tuple[bool, str]:
                            f"got escalation={er.escalation!r} band={er.band!r}")
         if er.band is not None:
             return False, f"{st} PD intake emitted band={er.band!r} (forbidden)"
-    # Motor in registered PD states still has no motor tree → state-scope.
-    for st in ("VIC", "QLD", "WA"):
+    # Motor in non-NSW AU states still has no motor tree → state-scope.
+    for st in ("VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT"):
         er2 = classify({"state": st, "claim_type": "motor",
                         "accident_type": "rear-end", "injuries": "none"})
         if er2.escalation != "state-scope":
             return False, (f"{st} motor intake: expected state-scope "
                            f"(no {st} motor tree), got {er2.escalation!r}")
-    return True, ("SA/TAS/ACT/NT PD → state-scope; "
-                  "VIC/QLD/WA motor → state-scope (PD-only multi-state)")
+    return True, ("non-AU PD → state-scope; "
+                  "non-NSW motor → state-scope (national PD-only multi-state)")
 
 
 def _test_qld_wa_pd_routing() -> tuple[bool, str]:
@@ -728,6 +733,52 @@ def _test_qld_wa_pd_hash_isolation() -> tuple[bool, str]:
                   f"({[h[:8] for h in pd_hashes]})")
 
 
+def _test_remaining_states_pd_national() -> tuple[bool, str]:
+    """SA/TAS/ACT/NT PD trees are registered, route to state-prefixed ids, and
+    escalate unsigned (pre-launch) with no band. Priority states VIC/QLD/WA are
+    covered by IX-18..25; this closes national PD coverage."""
+    states = ("SA", "TAS", "ACT", "NT")
+    route_checks = [
+        ("SA", "rear-end", "sa-pd1-rear-end"),
+        ("TAS", "reversing", "tas-pd3-reversing"),
+        ("ACT", "car_park", "act-pd6-car-park"),
+        ("NT", "other", "nt-pd7-other"),
+    ]
+    for st, col, expected in route_checks:
+        sid = _resolve_scenario({
+            "state": st, "claim_type": "property_damage",
+            "collision_type": col, "injuries": "none",
+        })
+        if sid != expected:
+            return False, f"{st} {col!r} routed to {sid!r}, expected {expected!r}"
+
+    violations = []
+    for st in states:
+        er = classify({"state": st, "claim_type": "property_damage",
+                       "collision_type": "rear-end", "injuries": "none"})
+        if er.escalation != "unsigned-scenario":
+            violations.append(f"{st}: expected unsigned-scenario, got {er.escalation!r}")
+        if er.band is not None:
+            violations.append(f"{st}: emitted band={er.band!r}")
+    if violations:
+        return False, "; ".join(violations)
+
+    # NT limitation wording must reflect 3 years (not 6).
+    nt_tree = _load_rule_tree_for("property_damage", "NT")
+    gov = nt_tree.get("governing_law", "")
+    if "3 years" not in gov and "3-year" not in gov:
+        return False, f"NT governing_law missing 3-year limitation note: {gov!r}"
+
+    # All 8 PD jurisdictions registered with distinct hashes.
+    pd_states = ("NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT")
+    hashes = [_compute_scenarios_hash(_load_rule_tree_for("property_damage", st))
+              for st in pd_states]
+    if len(set(hashes)) != 8:
+        return False, f"PD jurisdiction hashes not all distinct: {[h[:8] for h in hashes]}"
+    return True, ("SA/TAS/ACT/NT route + unsigned-escalate; NT 3yr flagged; "
+                  f"8 PD hashes distinct ({[h[:8] for h in hashes]})")
+
+
 # -----------------------------------------------------------------------
 # Runner
 # -----------------------------------------------------------------------
@@ -751,7 +802,7 @@ CASES: list[tuple[str, Callable[[], tuple[bool, str]]]] = [
     ("IX-15", _test_pd_signed_bands_deterministically),
     ("IX-16", _test_pd_routing_and_registry_four_trees),
     ("IX-17", _test_pd_backward_compat_motor_unchanged),
-    # Multi-state — VIC PD proof, then QLD + WA scaffold.
+    # Multi-state national PD — VIC/QLD/WA priority, then SA/TAS/ACT/NT.
     ("IX-18", _test_vic_pd_routing),
     ("IX-19", _test_vic_pd_unsigned_escalates),
     ("IX-20", _test_vic_pd_injury_firewall),
@@ -760,6 +811,7 @@ CASES: list[tuple[str, Callable[[], tuple[bool, str]]]] = [
     ("IX-23", _test_qld_wa_pd_routing),
     ("IX-24", _test_qld_wa_pd_unsigned_escalates),
     ("IX-25", _test_qld_wa_pd_hash_isolation),
+    ("IX-26", _test_remaining_states_pd_national),
 ]
 
 

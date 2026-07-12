@@ -144,9 +144,13 @@ RULE_TREE_REGISTRY: dict[tuple[str, str], str] = {
     ("NSW", "property_damage"): "rule-tree.nsw.pd.v1.json",
     ("NSW", "public_liability"): "rule-tree.nsw.pl.v1.json",
     ("NSW", "medical_negligence"): "rule-tree.nsw.medneg.v1.json",
-    ("VIC", "property_damage"): "rule-tree.vic.pd.v1.json",   # unsigned; escalates by G-PROD-LOCK
-    ("QLD", "property_damage"): "rule-tree.qld.pd.v1.json",   # unsigned
-    ("WA", "property_damage"): "rule-tree.wa.pd.v1.json",     # unsigned
+    ("VIC", "property_damage"): "rule-tree.vic.pd.v1.json",   # unsigned until Legal Head pre-launch
+    ("QLD", "property_damage"): "rule-tree.qld.pd.v1.json",
+    ("WA", "property_damage"): "rule-tree.wa.pd.v1.json",
+    ("SA", "property_damage"): "rule-tree.sa.pd.v1.json",
+    ("TAS", "property_damage"): "rule-tree.tas.pd.v1.json",
+    ("ACT", "property_damage"): "rule-tree.act.pd.v1.json",
+    ("NT", "property_damage"): "rule-tree.nt.pd.v1.json",     # 3 yr limitation
 }
 ```
 
@@ -187,21 +191,23 @@ hashes the tree in isolation). `sign_rule_trees.py --tree` accepts a
 - **Does not change the existing NSW sign-off.** NSW PD hash `1f13febaf6c0` stays live; the NSW provisional Legal Head sign-off (2026-07-05) is untouched.
 - **Does not commit to a multi-state brand strategy.** Whether claimdesk247.com.au serves all states or state-branded frontends exist is a separate decision.
 
-## 8. First deliverable (this session)
+## 8. Deliverable status (2026-07-13)
 
-Engineering scaffolding only, with VIC as proof, then QLD + WA:
+**Legal Head direction:** the product is not an internal-review stub — engineering
+completes the whole national PD surface; Legal Head approves before launch.
 
-1. The plan doc (this file).
-2. `rule-tree.vic.pd.v1.json` / `qld.pd.v1.json` / `wa.pd.v1.json` — NSW PD clones with state citations, **all scenarios unsigned**.
-3. Engine refactor: `RULE_TREE_REGISTRY` keyed by `(state, claim_type)`; `_resolve_scenario` and `_load_rule_tree_for` take `state`.
-4. Intake state dropdown accepts NSW/VIC/QLD/WA for motor+PD; `outside_nsw` and unregistered states still escalate (G-21).
-5. `sign_rule_trees.py` accepts `(state, claim_type)` selectors; `--verify` covers all registered trees.
-6. Acceptance tests IX-18..25: VIC/QLD/WA routing + unsigned escalation + hash isolation; SA/TAS/ACT/NT → `state-scope`.
-7. `00-INDEX.md` items 2d-VIC / 2d-QLD / 2d-WA marked `[PENDING — LEGAL]`.
-8. NSW suite green; NSW hashes unchanged.
+Engineering complete:
 
-No VIC/QLD/WA band will ship until Legal Head signs that state's tree.
+1. This plan doc.
+2. PD trees for **every** Australian jurisdiction: NSW (live) + VIC/QLD/WA (priority) + SA/TAS/ACT/NT — all non-NSW **unsigned** pending pre-launch Legal Head sign-off.
+3. `RULE_TREE_REGISTRY` keyed by `(state, claim_type)`; state-prefixed scenario ids.
+4. Intake dropdown: NSW/VIC/QLD/WA/SA/TAS/ACT/NT; `outside_nsw` → state-scope.
+5. Acceptance IX-18..26 (routing, unsigned escalate, hash isolation, NT 3yr).
+6. `00-INDEX.md` items 2d-VIC … 2d-NT marked engineering-complete / awaiting Legal Head.
+7. NSW suite green; NSW hashes unchanged.
+
+**Launch gate (Legal Head):** sign priority VIC → QLD → WA, then SA → TAS → ACT → NT via `sign_rule_trees.py --tree <STATE>.property_damage`. CD-R2 + PD counsel memo per state still required before public bands.
 
 ---
 
-*Prepared 2026-07-13; QLD+WA scaffold continued same day. Each state = (engineering scaffold + legal sign-off). Engineering is reusable; sign-off is per-state.*
+*Updated 2026-07-13 (national PD engineering complete; Legal Head pre-launch approval).*
