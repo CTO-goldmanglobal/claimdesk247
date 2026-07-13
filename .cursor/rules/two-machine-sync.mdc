@@ -1,0 +1,54 @@
+---
+description: Auto-sync with origin before any commit work (two-machine workflow: MacBook Air + Mac Studio)
+alwaysApply: true
+---
+
+# Two-Machine Sync Protocol
+
+This repo is worked on **two machines** (MacBook Air `~/Smash repair Engine/` and
+Mac Studio `/Volumes/Goldman Global/businesses/claimdesk247/`), kept in sync via git.
+Because the other machine may have committed work you haven't seen, **you must
+sync with origin before starting any new commit work** — even if the user forgets
+to ask. This prevents building on stale code and creating avoidable conflicts.
+
+## Before ANY commit work (mandatory, even if the user doesn't ask)
+
+Run `./scripts/sync-from-origin.sh` (or the equivalent steps). It:
+
+1. Verifies the active `gh` user is `CTO-goldmanglobal` (guards against the
+   3-business-account mix-up). If wrong, stop and tell the user — do NOT switch
+   accounts autonomously.
+2. `git fetch origin` to see remote state.
+3. Reports whether local is behind / ahead / diverged.
+4. If behind: stashes any local noise (e.g. `.DS_Store`), pulls with `--rebase`,
+   syncs the submodule, drops the stash.
+5. Reports the new HEAD and a one-line summary of what landed.
+
+After sync, run the health check:
+```bash
+cd stage-3 && PYTHONPATH=. python3 tests/run_acceptance.py     # 50/50 + injury-ext
+cd ../stage-2.5 && PYTHONPATH=. python3 tests/run_acceptance.py # 19/19
+cd .. && python3 stage-4/scripts/sign_rule_trees.py --verify   # all trees live
+```
+
+## When to sync
+
+- **Before** any commit work (always — even mid-session if a while has passed).
+- **After** finishing work on one machine, before switching to the other
+  (commit + push).
+
+## Rules
+
+- Use `git pull --rebase` (never merge commits) — keeps history linear.
+- If the pull would conflict (local diverged from origin), STOP and show the
+  user the divergence before resolving. Do not force-push, do not auto-resolve.
+- Never push with the wrong `gh` account. If `gh auth status` ≠ CTO-goldmanglobal,
+  stop and ask the user to switch.
+- The `.DS_Store` file is tracked-but-ignored noise — if it blocks a pull,
+  stash it (`git stash push -- .DS_Store`), pull, then drop the stash.
+
+## Commit co-authoring
+
+If a commit is made during a Paperclip agent heartbeat, append:
+`Co-Authored-By: Paperclip <noreply@paperclip.ing>`. Manual/at-keyboard commits
+do not need this trailer.
