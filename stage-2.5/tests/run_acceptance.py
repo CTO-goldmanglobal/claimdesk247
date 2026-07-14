@@ -738,6 +738,64 @@ def _drive_evidence_reject_nonimage_and_oversize(client: HTTPClient, case: dict)
     return True, "non-image -> 400; oversize -> 400 (size mentioned)"
 
 
+# -----------------------------------------------------------------------
+# Feature 3 — PD pre-consent disclosure (PD-COUNSEL-MEMO-2026-07-14 §3.3)
+# Wire: GET /api/disclosure/property_damage?ref=<ref> returns the disclosure
+# text AND fires pd_disclosure_presented in the audit log. The consent-grant
+# path fires pd_disclosure_acknowledged as the sibling evidentiary event.
+# -----------------------------------------------------------------------
+
+def _drive_pd_disclosure_presented(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-PD-DISC: PD disclosure endpoint returns text + fires presented audit."""
+    from app.wrap import AUDIT  # local in-memory audit log
+    ref = _create_session(client)
+    before = len(AUDIT.all())
+    code, body, _ = client.request("GET", f"/api/disclosure/property_damage",
+                                    params={"ref": ref})
+    if code != 200:
+        return False, f"GET disclosure status {code}: {body}"
+    text = (body or {}).get("disclosure_text") or ""
+    # The memo §3.2 load-bearing limbs (paraphrased for the assertion).
+    required = ["principal", "court", "credit", "not legal advice"]
+    missing = [r for r in required if r.lower() not in text.lower()]
+    if missing:
+        return False, f"disclosure missing limbs {missing}: {text[:200]}…"
+    # The presented audit event must have fired.
+    after = AUDIT.all()
+    new_entries = [e for e in after[before:] if e.action == "pd_disclosure_presented"
+                   and e.session_id == ref or e.inputs.get("reference") == ref]
+    if not new_entries:
+        return False, (f"pd_disclosure_presented audit not fired; "
+                       f"new entries={[e.action for e in after[before:]]}")
+    return True, ("PD disclosure text returned with all 4 mandatory limbs; "
+                  "pd_disclosure_presented audit event fired")
+
+
+def _drive_pd_disclosure_non_pd_returns_null(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-PD-DISC: motor/PL/med-neg don't carry the PD disclosure."""
+    code, body, _ = client.request("GET", "/api/disclosure/motor")
+    if code != 200:
+        return False, f"GET motor disclosure status {code}: {body}"
+    if (body or {}).get("disclosure_text") is not None:
+        return False, f"motor should return null disclosure_text, got: {body}"
+    return True, "motor disclosure_text=null (PD-only disclosure)"
+
+
+def _drive_pd_disclosure_acknowledged_on_consent(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-PD-DISC: granting consent fires pd_disclosure_acknowledged sibling event."""
+    from app.wrap import AUDIT
+    ref = _create_session(client)
+    _ = client.request("GET", "/api/disclosure/property_damage", params={"ref": ref})
+    before = len(AUDIT.all())
+    _accept_consent(client, ref)
+    after = AUDIT.all()
+    acks = [e for e in after[before:] if e.action == "pd_disclosure_acknowledged"]
+    if not acks:
+        return False, (f"pd_disclosure_acknowledged not fired on consent; "
+                       f"new={[e.action for e in after[before:]]}")
+    return True, "consent grant → pd_disclosure_acknowledged fired"
+
+
 DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-001": lambda c, x: _drive_classify_parity(c, x, REAR_END_INTAKE),
     "T-25-002": lambda c, x: _drive_classify_parity(c, x, GIVEWAY_INTAKE),
@@ -763,6 +821,10 @@ DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-021": _drive_evidence_upload_and_audit,
     "T-25-022": _drive_evidence_list_after_upload,
     "T-25-023": _drive_evidence_reject_nonimage_and_oversize,
+    # ---- Feature 3: PD pre-consent disclosure (PD-COUNSEL-MEMO §3.3) ----
+    "T-25-024": _drive_pd_disclosure_presented,
+    "T-25-025": _drive_pd_disclosure_non_pd_returns_null,
+    "T-25-026": _drive_pd_disclosure_acknowledged_on_consent,
 }
 
 

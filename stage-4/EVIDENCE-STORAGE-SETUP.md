@@ -271,3 +271,43 @@ curl "https://<your-engine>/api/case/$REF"
   if you add one. Add an acceptance test.
 * **Disaster recovery**: S3 cross-region replication to a second Sydney
   bucket is the standard DR pattern. Out of scope for v1.
+
+## 9. Retention scheduler (EventBridge → Lambda → run_evidence_retention.py)
+
+The S3 lifecycle rule (§5) handles tiered storage (Standard → Glacier Deep Archive
+@ 90d) and final expiration at the retention horizon. The **scheduler script**
+`stage-4/scripts/run_evidence_retention.py` is the per-case complement: it
+soft-deletes the `case_evidence` metadata rows for cases past retention so
+signed URLs stop resolving, while preserving the append-only audit log entries.
+
+Wire it as an EventBridge-scheduled Lambda:
+
+1. **Build the Lambda zip:**
+   ```bash
+   cd stage-4/scripts
+   python3 -m pip install --target ./lambda-deps supabase boto3
+   zip -r claimdesk247-evidence-retention.zip \
+       run_evidence_retention.py ../app/evidence_store.py lambda-deps/
+   ```
+2. **Create the Lambda** (Python 3.12, handler `run_evidence_retention.main`,
+   timeout 5 min, memory 512 MB). Env vars: `EVIDENCE_BUCKET_NAME`,
+   `AWS_REGION=ap-southeast-2`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+   (store the key in Secrets Manager, not inline, for prod),
+   `EVIDENCE_RETENTION_DAYS=2555`.
+3. **IAM role** — least-privilege: `s3:ListBucket`, `s3:DeleteObject`,
+   `s3:GetObject` (for list/delete only) on `arn:aws:s3:::claimdesk247-evidence-prod/*`,
+   plus the Lambda basic execution role.
+4. **EventBridge rule**: schedule `rate(1 day)` (or `cron(0 2 * * ? *)` for
+   02:00 UTC). Target the Lambda. Enable logging on the rule.
+5. **Verify after first run**: check CloudWatch Logs for the script's stdout
+   (`Total purged: N object(s)`). The audit log should show no entries from
+   this script (audit entries are preserved — the script only deletes S3 +
+   soft-deletes metadata).
+
+**One-off local run** (manual purge, e.g. before a retention-period change):
+```bash
+EVIDENCE_BUCKET_NAME=claimdesk247-evidence-prod \
+AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=ap-southeast-2 \
+SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+python3 stage-4/scripts/run_evidence_retention.py --dry-run
+```

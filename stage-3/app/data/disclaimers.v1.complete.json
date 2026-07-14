@@ -93,10 +93,16 @@
         "voice": "You're all done. Your reference number is [ref]. Here's what happens next: a lawyer from {{FIRM_NAME}} will call you back within {{CALLBACK_SLA}} during {{BUSINESS_HOURS}}. You'll get an SMS with a link to a summary of what we've recorded. And just to be clear — what we discussed today is general information, not legal advice, and a lawyer will review your full situation. Take care.",
         "web": "Your reference number is [ref]. A lawyer from {{FIRM_NAME}} will contact you within {{CALLBACK_SLA}} during {{BUSINESS_HOURS}}. We've sent you an SMS with a link to a PDF summary. Remember: this conversation is general information, not legal advice, and a lawyer will review your full situation."
       }
+    },
+    "pd_recovery_disclosure": {
+      "status": "BUILDER_DRAFT_COMPLETE",
+      "context": "PD intake consent-gate disclosure (PD-COUNSEL-MEMO-2026-07-14.md §3.2). Presented to the consumer BEFORE consent is recorded when the intake is for property_damage. Two audit events fire: pd_disclosure_presented (when the gate renders) and pd_disclosure_acknowledged (when the consumer accepts, sibling to consent_granted). Defeats the sector's 'I wasn't told' ACL complaint.",
+      "text": "Important — please read before you continue.\n\n{{OPERATOR_NAME}} helps you, the not-at-fault driver, recover the cost of your vehicle repairs, a like-for-like hire vehicle, and towing from the at-fault driver or their insurer. We do this as your recovery agent, on your instructions. You remain the owner of your claim. This means:\n\n• You are the principal. Any recovery is made in your name. If the matter settles, the payment comes to you (less our agreed fee, which we tell you before you agree to anything).\n• If the at-fault driver or their insurer disputes the claim, court proceedings — if they become necessary — would be brought in your name, conducted by a lawyer you instruct. You would be the plaintiff. That carries a potential cost risk: in the rare event a court found against you, you could be liable for some of the other side's costs.\n• Your credit record could be affected if a disputed matter is not resolved.\n\nWe will tell you at every step what is happening and what your options are. You can stop at any time. If at any point we think you should get independent legal advice, we will tell you so.\n\nThis service is not legal advice, and {{OPERATOR_NAME}} is not a law firm."
     }
   },
   "tokens": [
-    "{{PERSONA_NAME}}", "{{FIRM_NAME}}", "{{FIRM_PHONE}}", "{{CALLBACK_SLA}}",
-    "{{RETENTION_PERIOD}}", "{{TOW_PROVIDER_REF}}", "{{RENTAL_PARTNER_REF}}", "{{BUSINESS_HOURS}}"
+    "{{PERSONA_NAME}}", "{{FIRM_NAME}}", "{{OPERATOR_NAME}}", "{{PANEL_SHOP_NAME}}",
+    "{{FIRM_PHONE}}", "{{CALLBACK_SLA}}", "{{RETENTION_PERIOD}}",
+    "{{TOW_PROVIDER_REF}}", "{{RENTAL_PARTNER_REF}}", "{{BUSINESS_HOURS}}"
   ]
 }

@@ -1,7 +1,7 @@
 STAGE 3 ACCEPTANCE TEST REPORT
-Generated: 2026-07-14T07:30:13.691265Z
+Generated: 2026-07-14T11:42:32.080636Z
 Suite: acceptance-tests.stage3.yaml
-Stage 2 regression suite: /Users/finn/Smash repair Engine/stage-2/acceptance-tests.stage2.yaml
+Stage 2 regression suite: /Volumes/Goldman Global/businesses/claimdesk247/stage-2/acceptance-tests.stage2.yaml
 
 ================================================================================
 [PASS] T-3-001   gate=G-29   band=likely scenario=s1-rear-end
@@ -17,9 +17,9 @@ Stage 2 regression suite: /Users/finn/Smash repair Engine/stage-2/acceptance-tes
 [PASS] T-3-011   gate=G-40   confirm-back prompted for user_vehicle (and 2 total confirm turns)
 [PASS] T-3-012   gate=G-40   re-prompt cap hit, callback offered (no dead-end)
 [PASS] T-3-013   gate=G-35   advise_000=True reason='fuel_leak'
-[PASS] T-3-014   gate=G-35   tow ref=TOW-A6CF97, all slots captured, logged
+[PASS] T-3-014   gate=G-35   tow ref=TOW-D0529C, all slots captured, logged
 [PASS] T-3-015   gate=G-35   rental explainer is general-info; no forbidden phrase
-[PASS] T-3-016   gate=G-35   rental ref=REN-FC1C5C, slots captured, noted
+[PASS] T-3-016   gate=G-35   rental ref=REN-A805F8, slots captured, noted
 [PASS] T-3-017   gate=G-38   parking -> s5-reversing (CR-3-01 applied)
 [PASS] T-3-018   gate=G-38   free text rejected with reprompt (CR-3-02)
 [PASS] T-3-019   gate=G-38   version=3.1.0 out_of_enum_bands=0
@@ -57,4 +57,4 @@ Stage 2 regression suite: /Users/finn/Smash repair Engine/stage-2/acceptance-tes
 ================================================================================
 TOTAL: 50  PASS: 50  FAIL: 0
 
-All tests green. Report written to /Users/finn/Smash repair Engine/stage-3/deliverables/test-report.txt
+All tests green. Report written to /Volumes/Goldman Global/businesses/claimdesk247/stage-3/deliverables/test-report.txt

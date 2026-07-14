@@ -699,6 +699,21 @@ def create_app() -> FastAPI:
                 session_id=s.session_id, user=_client_ip(request), action="consent_granted",
                 inputs={"reference": ref}, rule_path=[], output={"state": s.state},
             )
+            # PD-COUNSEL-MEMO §3.3: the consent-grant doubles as the
+            # pd_disclosure_acknowledged sibling event for any session whose
+            # pd_disclosure_presented event already fired.
+            presented = any(
+                e.action == "pd_disclosure_presented"
+                and (e.session_id == s.session_id or e.inputs.get("reference") == ref)
+                for e in AUDIT.all()
+            )
+            if presented:
+                AUDIT.append(
+                    session_id=s.session_id, user=_client_ip(request),
+                    action="pd_disclosure_acknowledged",
+                    inputs={"reference": ref, "claim_type": "property_damage"},
+                    rule_path=[], output={"state": s.state},
+                )
             return {"ref": s.reference, "reference": s.reference,
                     "consentRequired": True, "consentGranted": True, "next": "slot"}
 
@@ -749,7 +764,7 @@ def create_app() -> FastAPI:
 
     # ---- /api/consent (S0a) ----
     @app.post("/api/consent")
-    def post_consent(req: ConsentRequest) -> Any:
+    def post_consent(req: ConsentRequest, request: Request) -> Any:
         s = SESSIONS.by_reference(req.reference)
         if s is None:
             raise HTTPException(status_code=404, detail="session not found")
@@ -759,8 +774,59 @@ def create_app() -> FastAPI:
             return {"next": "abandoned"}
         stage3_state_machine.acknowledge_consent(s, privacy_acknowledged=True)
         SESSIONS.put(s)  # F-E: persist consent so the next request sees it (real store)
+        # PD-COUNSEL-MEMO §3.3: the consent-grant doubles as the
+        # pd_disclosure_acknowledged sibling event if the presented-event fired.
+        presented = any(
+            e.action == "pd_disclosure_presented"
+            and (e.session_id == s.session_id or e.inputs.get("reference") == req.reference)
+            for e in AUDIT.all()
+        )
+        if presented:
+            ip = _client_ip(request)
+            AUDIT.append(
+                session_id=s.session_id, user=ip,
+                action="pd_disclosure_acknowledged",
+                inputs={"reference": req.reference, "claim_type": "property_damage"},
+                rule_path=[], output={"state": s.state},
+            )
         slot_def = stage3_state_machine.SLOT_DEFINITIONS[0]
         return {"next": "slot", "slot": {"id": 1, "name": slot_def["slot"], "type": slot_def["type"]}}
+
+    # ---- /api/disclosure/{claim_type} (PD-COUNSEL-MEMO-2026-07-14 §3.3) ----
+    # Returns the pre-consent disclosure text for the given claim_type and fires
+    # the pd_disclosure_presented audit event when claim_type=property_damage.
+    # The consent_granted audit (fired in /api/session + /api/consent above)
+    # doubles as the pd_disclosure_acknowledged sibling event for PD intakes.
+    # Together these two events satisfy the memo's evidentiary requirement
+    # that the consumer was told before any PII was collected.
+    @app.get("/api/disclosure/{claim_type}")
+    def get_disclosure(claim_type: str, request: Request) -> Any:
+        ref = request.query_params.get("ref")
+        ct = claim_type.lower()
+        if ct != "property_damage":
+            # Motor/PL/med-neg don't carry the PD recovery disclosure today;
+            # the privacy notice in /api/session is their consent-gate text.
+            return {"claim_type": ct, "disclosure_text": None}
+        try:
+            raw = stage3_config.get_disclaimer("pd_recovery_disclosure")
+            text = stage3_config.resolve_tokens(raw)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=500, detail=f"disclosure render failed: {exc}")
+        # Fire the presented-event for this session if we have a ref. Best-effort
+        # — the audit is the evidentiary record, but the disclosure can still be
+        # rendered without one (e.g. a pre-session preview in the widget).
+        if ref:
+            s = SESSIONS.by_reference(ref)
+            if s is not None:
+                ip = _client_ip(request)
+                AUDIT.append(
+                    session_id=s.session_id, user=ip,
+                    action="pd_disclosure_presented",
+                    inputs={"claim_type": "property_damage", "reference": ref},
+                    rule_path=[], output={"state": s.state},
+                )
+                SESSIONS.put(s)
+        return {"claim_type": "property_damage", "disclosure_text": text}
 
     # ---- /api/slot (S3 + validation) ----
     # Two dialects on one path:

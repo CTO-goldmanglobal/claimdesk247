@@ -75,6 +75,8 @@ def get_disclaimer(key: str) -> str:
         if isinstance(pn, dict) and "text" in pn and isinstance(pn["text"], dict):
             return pn["text"]["web"]
         return pn.get("text", "")
+    if key == "pd_recovery_disclosure":
+        return strings["pd_recovery_disclosure"]["text"]
     if key.startswith("escalation_handoff."):
         variant = key.split(".", 1)[1]
         variants = strings["escalation_handoff"].get("variants", {})

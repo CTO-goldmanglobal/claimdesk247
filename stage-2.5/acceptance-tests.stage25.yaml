@@ -209,7 +209,35 @@ cases:
     - "POST /api/intake/:ref/evidence (11MB JPEG)"
   expect: { non_image: 400, oversize: 400 }
 
+# ---- Feature 3: PD pre-consent disclosure (PD-COUNSEL-MEMO-2026-07-14 §3.3) ----
+# Validates the disclosure text is presented before consent AND both evidentiary
+# audit events fire (presented + acknowledged sibling on consent grant).
+
+- id: T-25-024
+  gate: G-PD-DISC
+  desc: "GET /api/disclosure/property_damage returns text + fires pd_disclosure_presented audit"
+  flow:
+    - "POST /api/session"
+    - "GET /api/disclosure/property_damage?ref=<ref>"
+  expect: { http: 200, disclosure_text_present: true, audit_action: pd_disclosure_presented }
+
+- id: T-25-025
+  gate: G-PD-DISC
+  desc: "non-PD claim types return null disclosure_text (PD-only disclosure)"
+  flow:
+    - "GET /api/disclosure/motor"
+  expect: { http: 200, disclosure_text: null }
+
+- id: T-25-026
+  gate: G-PD-DISC
+  desc: "consent grant after PD disclosure → pd_disclosure_acknowledged audit sibling"
+  flow:
+    - "POST /api/session"
+    - "GET /api/disclosure/property_damage?ref=<ref>"
+    - "POST /api/consent (accept)"
+  expect: { audit_action: pd_disclosure_acknowledged }
+
 coverage_assertion:
-  gates_exercised: [G-41, G-42, G-43, G-44, G-45, G-46, G-47, G-48, G-49, G-57, G-T6, G-EV]
+  gates_exercised: [G-41, G-42, G-43, G-44, G-45, G-46, G-47, G-48, G-49, G-57, G-T6, G-EV, G-PD-DISC]
   parity_proven: true
   runnable_against_weblink: true
