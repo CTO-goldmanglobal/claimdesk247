@@ -1,5 +1,5 @@
 STAGE 2.5 ACCEPTANCE TEST REPORT (Engine-as-Endpoint)
-Generated: 2026-07-14T14:04:50.273950Z
+Generated: 2026-07-14T19:56:55.966060Z
 Suite: acceptance-tests.stage25.yaml
 Mode: local (TestClient)
 Stage 2 regression: /Volumes/Goldman Global/businesses/claimdesk247/stage-2/tests/run_acceptance.py
@@ -13,10 +13,10 @@ Stage 3 regression: /Volumes/Goldman Global/businesses/claimdesk247/stage-3/test
 [PASS] T-25-005   gate=G-43   esc-injury short-circuits with no band, terminal=True
 [PASS] T-25-006   gate=G-43   esc-multiparty short-circuits with no band
 [PASS] T-25-007   gate=G-44   full intake used opaque reference only; PII never in URL
-[PASS] T-25-008   gate=G-44   PDF served via opaque ref GF-95F7EC4B
+[PASS] T-25-008   gate=G-44   PDF served via opaque ref GF-7EB0FB83
 [PASS] T-25-009   gate=G-45   customer -> 403 (server-side enforced)
 [PASS] T-25-010   gate=G-45   legal_staff -> 200, all 8 brief fields present
-[PASS] T-25-011   gate=G-46   deterministic ref in test mode: GF-6CF7B73B
+[PASS] T-25-011   gate=G-46   deterministic ref in test mode: GF-0F7BC932
 [PASS] T-25-012   gate=G-46   preview env: determinism enabled (production is gated)
 [PASS] T-25-013   gate=G-47   healthz ok: engine=1.0.0 tree=3.1.0 hash=3964e668d905...
 [PASS] T-25-014   gate=G-49   test mode: CORS is open (CORS_ALLOWED_ORIGINS=*); production lockdown is G-55 deployer-evidence
@@ -26,7 +26,7 @@ Stage 3 regression: /Volumes/Goldman Global/businesses/claimdesk247/stage-3/test
 [PASS] T-25-018   gate=G-57   legal_staff w/ MFA -> 200, brief fields present
 [PASS] T-25-019   gate=G-T6   scenario-question endpoint: start -> user_position -> user_motion
 [PASS] T-25-020   gate=G-EV   upload rejected pre-consent (403: consent required)
-[PASS] T-25-021   gate=G-EV   upload ok: sha256=43739c566e26…, s3_key=GF-2F6B36A3/1e9f528a-0dd2-400a-a784-c3df76bb4f1f.png, audit written
+[PASS] T-25-021   gate=G-EV   upload ok: sha256=43739c566e26…, s3_key=GF-709E5C1F/e447509c-d51f-4d84-a0de-43d8998ec3f6.png, audit written
 [PASS] T-25-022   gate=G-EV   list ok (count=1); case view bound (evidence_count=1, pdf linked)
 [PASS] T-25-023   gate=G-EV   non-image -> 400; oversize -> 400 (size mentioned)
 [PASS] T-25-024   gate=G-PD-DISC  PD disclosure text returned with all 4 mandatory limbs; pd_disclosure_presented audit event fired
@@ -35,7 +35,10 @@ Stage 3 regression: /Volumes/Goldman Global/businesses/claimdesk247/stage-3/test
 [PASS] T-25-027   gate=G-PD-DISC  PD disclosure without ref → 400 (evidentiary binding enforced)
 [PASS] T-25-028   gate=G-PD-DISC  disclosure_hash carried sha256:51914751dccfac0d → acknowledged
 [PASS] T-25-029   gate=G-PD-DISC  consent succeeds under _PersistingAudit (P0-1 fixed)
+[PASS] T-25-030   gate=G-PWA  prefill: 5 keys applied, 1 dropped, audit fired
+[PASS] T-25-031   gate=G-PWA  note stored + audited; empty/oversize rejected (400)
+[PASS] T-25-032   gate=G-PWA  review: 2 slots, 1 note, consent-gated (403 pre-consent)
 ================================================================================
-TOTAL: 29  PASS: 29  FAIL: 0
+TOTAL: 32  PASS: 32  FAIL: 0
 
 All tests green. Report written to /Volumes/Goldman Global/businesses/claimdesk247/stage-2.5/deliverables/test-report.txt

@@ -263,6 +263,37 @@ cases:
     - "POST /api/consent (accept) — must not 500"
   expect: { http: 200, no_attribute_error: true }
 
+# ---- Feature 4: crashproof-checklist handoff + receptionist (2026-07-15) ----
+# The checklist PWA hands off via POST /api/session {prefill}; the receptionist
+# chat uses POST /api/intake/{ref}/note + GET /api/intake/{ref}/review.
+
+- id: T-25-030
+  gate: G-PWA
+  desc: "checklist prefill → session.intake populated, allowed/dropped echoed, audit fires"
+  flow:
+    - "POST /api/session {channel: checklist-pwa, prefill: {state, accident_type, ...}}"
+  expect: { prefill_applied: [state, accident_type, user_vehicle, ...], audit_action: intake_prefilled_from_checklist }
+
+- id: T-25-031
+  gate: G-PWA
+  desc: "free-text note stored + audited; empty/oversize rejected"
+  flow:
+    - "session + consent"
+    - "POST /api/intake/{ref}/note {text, source, kind}"
+    - "POST /api/intake/{ref}/note {text: '   '} → 400"
+    - "POST /api/intake/{ref}/note {text: 5001 chars} → 400"
+  expect: { stored: true, audit_action: intake_note_added, empty_400: true, oversize_400: true }
+
+- id: T-25-032
+  gate: G-PWA
+  desc: "intake review returns full state (slots + notes); consent-gated"
+  flow:
+    - "POST /api/session with prefill"
+    - "GET /api/intake/{ref}/review (no consent) → 403"
+    - "consent + add note"
+    - "GET /api/intake/{ref}/review → 200 with slots_filled_count + notes_count"
+  expect: { http_pre_consent: 403, http_post_consent: 200, has_intake: true, notes_count: 1 }
+
 coverage_assertion:
   gates_exercised: [G-41, G-42, G-43, G-44, G-45, G-46, G-47, G-48, G-49, G-57, G-T6, G-EV, G-PD-DISC]
   parity_proven: true

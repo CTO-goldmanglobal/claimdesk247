@@ -31,6 +31,7 @@ import re
 import secrets
 import sys
 import types
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -105,7 +106,7 @@ else:
     sys.modules["app"] = _preserved_app
 
 # FastAPI
-from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File
+from fastapi import Body, FastAPI, HTTPException, Request, Response, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -625,6 +626,13 @@ class SessionRequest(BaseModel):
     ref: Optional[str] = None           # frontend consent step: {ref, consentGranted}
     reference: Optional[str] = None     # tolerated alias
     consentGranted: Optional[bool] = None
+    # Crashproof-checklist handoff (2026-07-15): when a customer completes the
+    # checklist PWA and taps "Send to ClaimDesk", the frontend posts the
+    # collected state here so the chat receptionist doesn't re-ask anything
+    # already captured. Values are written to session.intake directly. Only
+    # slot-compatible keys are accepted (state, accident_type, etc.); unknown
+    # keys are dropped to keep the engine's enum invariants intact.
+    prefill: Optional[dict[str, Any]] = None
 
 
 class ConsentRequest(BaseModel):
@@ -647,6 +655,14 @@ class ClassifyRequest(BaseModel):
 class ExtrasRequest(BaseModel):
     """Stage 4 (CR-5-01): engine-only intake fields, set via /api/intake/:ref/extras."""
     fields: dict[str, Any]
+
+
+class NoteRequest(BaseModel):
+    """Free-text narrative note (2026-07-15): from the checklist PWA's story
+    step or the receptionist chat. Append-only; never affects the band."""
+    text: str
+    source: Optional[str] = None    # "checklist" | "chat" | "customer"
+    kind: Optional[str] = None      # "story" | "correction" | "addition"
 
 
 class ScenarioQuestionRequest(BaseModel):
@@ -827,13 +843,60 @@ def create_app() -> FastAPI:
                     "consent_required": True,
                     "next": "consent",
                 }
+        # Crashproof-checklist handoff (2026-07-15): pre-fill the intake from
+        # the PWA's collected state. The checklist captures state, accident_type,
+        # user_vehicle, other_vehicles, etc. — anything the customer already
+        # typed into the PWA shouldn't be re-asked in the chat. We only accept
+        # slot-compatible keys (the engine's enum invariants are enforced at
+        # submit time, but pre-fill is also validated here so a malformed
+        # checklist export can't poison the session).
+        prefill_applied: dict[str, Any] = {}
+        prefill_dropped: list[str] = []
+        if req.prefill and isinstance(req.prefill, dict):
+            # Allowlist of slots the checklist may pre-fill. This is the
+            # intersection of motor + PD slot names that aren't
+            # engine-critical in the sense of /extras (injuries, claim_type,
+            # state still go through /api/slot for enum enforcement, so they
+            # are allowed here; see _EXTRAS_FORBIDDEN_KEYS for the contrast).
+            _PREFILL_ALLOWED_KEYS = frozenset({
+                "state", "state_of_accident", "claim_type",
+                "accident_type", "collision_type",
+                "user_vehicle", "other_vehicles", "movement_description",
+                "datetime_location", "control_devices", "police_attendance",
+                "witnesses", "dashcam", "photos_taken",
+                "other_driver_details", "damage_locations",
+                "incident_date",
+            })
+            for k, v in req.prefill.items():
+                if k in _PREFILL_ALLOWED_KEYS and v is not None and v != "":
+                    s.intake[k] = v
+                    prefill_applied[k] = v
+                else:
+                    prefill_dropped.append(k)
         SESSIONS.put(s)
         # Audit (G-34 / G-52: every session logs timestamp + session id)
+        audit_inputs: dict[str, Any] = {
+            "channel": req.channel, "reference": s.reference,
+        }
+        if prefill_applied:
+            audit_inputs["prefill_applied"] = list(prefill_applied.keys())
+            audit_inputs["prefill_dropped"] = prefill_dropped
         AUDIT.append(
             session_id=s.session_id, user=ip, action="session_created",
-            inputs={"channel": req.channel, "reference": s.reference},
-            rule_path=[], output={"state": s.state},
+            inputs=audit_inputs, rule_path=[], output={"state": s.state},
         )
+        # Separate audit event when pre-fill came from the checklist, so the
+        # receptionist can phrase its first message correctly ("I see you've
+        # already captured your vehicle and the accident details from the
+        # checklist — anything you'd like to add or correct?").
+        if prefill_applied:
+            AUDIT.append(
+                session_id=s.session_id, user=ip,
+                action="intake_prefilled_from_checklist",
+                inputs={"reference": s.reference,
+                        "applied": list(prefill_applied.keys())},
+                rule_path=[], output={"state": s.state},
+            )
         return {
             "ref": s.reference,            # frontend
             "consentRequired": True,       # frontend
@@ -841,6 +904,10 @@ def create_app() -> FastAPI:
             "reference": s.reference,      # engine-contract (tests)
             "consent_required": True,
             "next": "consent",
+            # Echo back what was applied so the frontend can skip those
+            # questions in the chat and jump to whatever's missing.
+            "prefill_applied": list(prefill_applied.keys()),
+            "prefill_dropped": prefill_dropped,
         }
 
     # ---- /api/consent (S0a) ----
@@ -1072,6 +1139,55 @@ def create_app() -> FastAPI:
         s.intake.update(payload.fields)
         SESSIONS.put(s)
         return {"stored": list(payload.fields.keys())}
+
+    # ---- /api/intake/{ref}/note (2026-07-15) ----
+    # Free-text narrative capture. The crashproof-checklist PWA's "story"
+    # step (sequence, impact, airbags, etc.) and the receptionist chat
+    # itself both collect narrative colour that doesn't fit the structured
+    # slots. This endpoint stores those notes on the session (and audit-logs
+    # each one) so the lawyer review has the customer's own words alongside
+    # the band. Notes never affect the band themselves.
+    @app.post("/api/intake/{ref}/note")
+    def post_note(ref: str, request: Request, payload: NoteRequest = Body(...)) -> Any:
+        """Append a free-text note to the case file. Notes are append-only —
+        corrections and additions create new notes; they never overwrite
+        prior ones (the audit chain must show the customer's story evolving,
+        same as a real receptionist's notes pad)."""
+        s = SESSIONS.by_reference(ref)
+        if s is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        if not s.consent:
+            raise HTTPException(status_code=403, detail="consent required")
+        text = (payload.text or "").strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="note text required")
+        if len(text) > 5000:
+            raise HTTPException(
+                status_code=400,
+                detail="note too long (max 5000 chars); split into multiple notes",
+            )
+        # Notes live in the session intake under a reserved key. They don't
+        # affect banding because the engine ignores keys outside its known
+        # slot set. Frontend reads them via GET /api/intake/{ref}/review.
+        notes = s.intake.setdefault("_notes", [])
+        note_entry = {
+            "text": text,
+            "source": payload.source or "customer",
+            "kind": payload.kind or "note",
+            "at": datetime.now(timezone.utc).isoformat(),
+            "by": _client_ip(request),
+        }
+        notes.append(note_entry)
+        SESSIONS.put(s)
+        # Audit every note — these are evidentiary (the customer said this).
+        AUDIT.append(
+            session_id=s.session_id, user=_client_ip(request),
+            action="intake_note_added",
+            inputs={"reference": ref, "source": note_entry["source"],
+                    "kind": note_entry["kind"], "length": len(text)},
+            rule_path=[], output={"notes_count": len(notes)},
+        )
+        return {"stored": True, "notes_count": len(notes)}
 
     # ---- /api/classify (G-41, G-42, G-43) ----
     def _render_pdf_for_session(s: Any) -> bytes:
@@ -1500,6 +1616,53 @@ def create_app() -> FastAPI:
                 "S5-FAULT-INFO", "S6-EVIDENCE", "S7-NEXT-STEPS", "S8-CLOSE",
                 "S4-CLASSIFY",  # classify done, awaiting scenario questions
             ) or bool(s.engine_result),
+        }
+
+    # ---- /api/intake/{ref}/review (2026-07-15) ----
+    # Receptionist readback: the customer (or the receptionist chat UI)
+    # asks "what have I told you so far?" — this returns the full case
+    # state: every slot filled, every scenario answer, every note, the
+    # current band/escalation, and the evidence count. The receptionist
+    # uses this to phrase its first message when the customer comes back
+    # after completing the checklist PWA.
+    @app.get("/api/intake/{ref}/review")
+    def get_intake_review(ref: str, request: Request) -> Any:
+        """Return the case file as the customer knows it. Consent-gated
+        (same as /api/case/{ref}); the difference is this endpoint exposes
+        the full intake dict (slot values + scenario answers + notes),
+        whereas /api/case returns a customer-facing summary."""
+        s = _require_session_with_consent(ref, request)
+        # Strip _notes into a top-level field so it's not confused with slots.
+        intake_copy = {k: v for k, v in s.intake.items() if k != "_notes"}
+        notes = s.intake.get("_notes", [])
+        band = None
+        escalation = None
+        scenario_id = None
+        if s.engine_result:
+            band = s.engine_result.band
+            escalation = s.engine_result.escalation
+            scenario_id = s.engine_result.scenario_id
+        # Audit the readback so the trail shows the customer (or chat)
+        # reviewed the file — evidentiary if the customer later disputes.
+        AUDIT.append(
+            session_id=s.session_id, user=_client_ip(request),
+            action="intake_reviewed",
+            inputs={"reference": ref}, rule_path=[],
+            output={"slots_filled": len(intake_copy),
+                    "notes_count": len(notes),
+                    "band": band, "escalation": escalation},
+        )
+        return {
+            "reference": ref,
+            "state": s.state,
+            "intake": intake_copy,           # slot values + scenario answers
+            "notes": notes,                  # free-text narrative
+            "notes_count": len(notes),
+            "scenario_id": scenario_id,
+            "band": band,
+            "escalation": escalation,
+            "slots_filled": list(intake_copy.keys()),
+            "slots_filled_count": len(intake_copy),
         }
 
     return app

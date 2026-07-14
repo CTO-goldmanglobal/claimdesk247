@@ -868,6 +868,123 @@ def _drive_pd_disclosure_persisting_audit_no_crash(client: HTTPClient, case: dic
         wrap_mod.AUDIT = original_audit
 
 
+# -----------------------------------------------------------------------
+# Feature 4 — Crashproof-checklist handoff + receptionist readback (2026-07-15)
+# The checklist PWA collects state at the scene; the receptionist chat
+# needs to (a) accept that pre-fill at session creation, (b) accept free-text
+# narrative notes, and (c) read back the full case state so the chat can
+# say "I see you've already captured X — anything to add?".
+# -----------------------------------------------------------------------
+
+def _drive_checklist_prefill(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-PWA: POST /api/session with prefill → session.intake populated +
+    prefill_applied echoed + audit fires intake_prefilled_from_checklist."""
+    from app.wrap import AUDIT
+    prefill = {
+        "state": "NSW",
+        "accident_type": "rear-end",
+        "user_vehicle": "2019 Toyota Camry (white)",
+        "other_vehicles": "2021 Mazda CX-5 (silver)",
+        "datetime_location": "2026-07-15 8am, Parramatta Rd",
+        # This key should be dropped (not in allowlist):
+        "_bogus_internal_key": "should not leak",
+    }
+    code, body, _ = client.request(
+        "POST", "/api/session",
+        json={"channel": "checklist-pwa", "prefill": prefill},
+    )
+    if code != 200:
+        return False, f"prefill session status {code}: {body}"
+    applied = (body or {}).get("prefill_applied") or []
+    dropped = (body or {}).get("prefill_dropped") or []
+    # The 5 valid keys should be applied; the bogus one dropped.
+    expected_applied = {"state", "accident_type", "user_vehicle",
+                        "other_vehicles", "datetime_location"}
+    if set(applied) != expected_applied:
+        return False, f"applied mismatch: got {applied}, want {expected_applied}"
+    if "_bogus_internal_key" not in dropped:
+        return False, f"bogus key not dropped: {dropped}"
+    # Audit event must have fired.
+    ref = body["reference"]
+    events = [e for e in AUDIT.all()
+              if e.action == "intake_prefilled_from_checklist"
+              and e.inputs.get("reference") == ref]
+    if not events:
+        return False, "intake_prefilled_from_checklist audit not fired"
+    return True, (f"prefill: {len(applied)} keys applied, "
+                  f"{len(dropped)} dropped, audit fired")
+
+
+def _drive_intake_note(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-PWA: POST /api/intake/{ref}/note → stored, audited, length-capped."""
+    from app.wrap import AUDIT
+    ref = _create_session(client)
+    _accept_consent(client, ref)
+    before = len(AUDIT.all())
+    code, body, _ = client.request(
+        "POST", f"/api/intake/{ref}/note",
+        json={"text": "I was the middle car in a 3-car chain.",
+              "source": "chat", "kind": "correction"},
+    )
+    if code != 200:
+        return False, f"note POST status {code}: {body}"
+    if not (body or {}).get("stored"):
+        return False, f"note not stored: {body}"
+    # Audit event fired.
+    events = [e for e in AUDIT.all()[before:]
+              if e.action == "intake_note_added"]
+    if not events:
+        return False, "intake_note_added audit not fired"
+    # Empty note → 400.
+    code2, _, _ = client.request(
+        "POST", f"/api/intake/{ref}/note",
+        json={"text": "   "},
+    )
+    if code2 != 400:
+        return False, f"empty note should 400, got {code2}"
+    # Oversize → 400.
+    code3, _, _ = client.request(
+        "POST", f"/api/intake/{ref}/note",
+        json={"text": "x" * 5001},
+    )
+    if code3 != 400:
+        return False, f"oversize note should 400, got {code3}"
+    return True, "note stored + audited; empty/oversize rejected (400)"
+
+
+def _drive_intake_review(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-PWA: GET /api/intake/{ref}/review → returns full intake + notes +
+    slot count; consent-gated (403 without consent)."""
+    from app.wrap import AUDIT
+    # Pre-fill + note + review in one flow.
+    code, body, _ = client.request(
+        "POST", "/api/session",
+        json={"channel": "checklist-pwa",
+              "prefill": {"state": "NSW", "accident_type": "rear-end"}},
+    )
+    ref = body["reference"]
+    # Without consent → 403 (review is consent-gated like /api/case).
+    code2, _, _ = client.request("GET", f"/api/intake/{ref}/review")
+    if code2 != 403:
+        return False, f"review before consent should 403, got {code2}"
+    _accept_consent(client, ref)
+    # Add a note.
+    client.request("POST", f"/api/intake/{ref}/note",
+                   json={"text": "Original narrative.", "source": "checklist"})
+    # Now review.
+    code3, body3, _ = client.request("GET", f"/api/intake/{ref}/review")
+    if code3 != 200:
+        return False, f"review status {code3}: {body3}"
+    if (body3 or {}).get("notes_count") != 1:
+        return False, f"notes_count should be 1, got {body3}"
+    if "state" not in (body3 or {}).get("intake", {}):
+        return False, f"intake missing pre-filled 'state': {body3}"
+    if (body3 or {}).get("slots_filled_count", 0) < 2:
+        return False, f"slots_filled_count too low: {body3}"
+    return True, (f"review: {body3['slots_filled_count']} slots, "
+                  f"{body3['notes_count']} note, consent-gated (403 pre-consent)")
+
+
 DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-001": lambda c, x: _drive_classify_parity(c, x, REAR_END_INTAKE),
     "T-25-002": lambda c, x: _drive_classify_parity(c, x, GIVEWAY_INTAKE),
@@ -900,6 +1017,10 @@ DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-027": _drive_pd_disclosure_requires_ref,
     "T-25-028": _drive_pd_disclosure_hash_carried_to_ack,
     "T-25-029": _drive_pd_disclosure_persisting_audit_no_crash,  # P0-1 regression
+    # ---- Feature 4: checklist handoff + receptionist (2026-07-15) ----
+    "T-25-030": _drive_checklist_prefill,
+    "T-25-031": _drive_intake_note,
+    "T-25-032": _drive_intake_review,
 }
 
 
