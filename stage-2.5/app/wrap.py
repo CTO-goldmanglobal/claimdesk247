@@ -1035,23 +1035,40 @@ def create_app() -> FastAPI:
         }
 
     # ---- /api/intake/:ref/extras (CR-5-01) ----
+    # P1-1 hardening (2026-07-14 review): the extras route is engine-only and
+    # was originally "light validation" — keys alnum, values scalar. But it
+    # could overwrite engine-critical slots (injuries, harm_severity,
+    # claim_type, state) bypassing the slot enum, which let non-enum injury
+    # values reach the engine. Now: those keys are forbidden here. They MUST
+    # go through /api/slot where the enum is enforced.
+    _EXTRAS_FORBIDDEN_KEYS = frozenset({
+        "injuries", "harm_severity", "claim_type", "state",
+        "state_of_accident", "collision_type", "accident_type",
+        "treatment_type", "hazard_type", "incident_date",
+    })
     @app.post("/api/intake/{ref}/extras")
     def post_extras(ref: str, payload: ExtrasRequest, request: Request) -> Any:
         """Store engine-only fields (e.g. simultaneous_entry, sight_lines,
-        chain_count) in the intake. NOT user-facing; reserved for
-        operator scripts and tests. Validated lightly: keys must be
-        alphanumeric/underscore, values must be JSON-serialisable scalars
-        or short lists.
-        """
+        chain_count) in the intake. NOT user-facing; reserved for operator
+        scripts and tests. Validated: keys alphanumeric/underscore, values
+        JSON-serialisable scalars or short lists, and MUST NOT be one of the
+        engine-critical slots (use /api/slot for those — enum-enforced)."""
         s = SESSIONS.by_reference(ref)
         if s is None:
             raise HTTPException(status_code=404, detail="session not found")
         if not s.consent:
             raise HTTPException(status_code=403, detail="consent required")
-        # Light validation
         for k, v in payload.fields.items():
             if not isinstance(k, str) or not k.replace("_", "").isalnum():
                 raise HTTPException(status_code=400, detail=f"bad key: {k!r}")
+            if k in _EXTRAS_FORBIDDEN_KEYS:
+                # Never let extras overwrite an enum-bound slot. The injury
+                # firewall depends on injuries coming through the slot validator.
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"key {k!r} is engine-critical; use /api/slot "
+                           f"(enum-enforced), not /extras"
+                )
         s.intake.update(payload.fields)
         SESSIONS.put(s)
         return {"stored": list(payload.fields.keys())}

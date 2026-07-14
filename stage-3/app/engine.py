@@ -29,6 +29,25 @@ VALID_BANDS = frozenset({"likely", "possible", "unclear", "insufficient"})
 # exact period with Legal Head — this is a one-line change when confirmed.
 LIMITATION_BUFFER_YEARS = 2.5
 
+# P1-2 fix (2026-07-14 review): per-state PD limitation horizons. PD was
+# previously exempt from esc-limitation, which meant an NT intake 4 years old
+# (past NT's 3-year Limitation Act 1981 period) would band 'likely' — telling
+# a statute-barred customer "we can run that recovery for you". That is
+# misleading conduct. Below: the full limitation period minus a 6-month safety
+# buffer (so we never emit a band within 6 months of the bar). Source: counsel
+# memo §1 + per-state Limitation Acts (NT = 3yr; all others = 6yr).
+PD_LIMITATION_YEARS_BY_STATE: dict[str, float] = {
+    "NSW": 6.0 - 0.5,
+    "VIC": 6.0 - 0.5,
+    "QLD": 6.0 - 0.5,
+    "WA": 6.0 - 0.5,
+    "SA": 6.0 - 0.5,
+    "TAS": 6.0 - 0.5,
+    "ACT": 6.0 - 0.5,
+    "NT": 3.0 - 0.5,  # NT is the short-period outlier (Limitation Act 1981)
+}
+PD_LIMITATION_DEFAULT_YEARS = 6.0 - 0.5  # for any future state not in the map
+
 # Truthiness normalisation. YAML parses bare `yes`/`no` as Python True/False;
 # the engine should treat them consistently. The `injuries: none` value is
 # parsed as the string "none" (not Python None) and is therefore NOT truthy.
@@ -938,11 +957,18 @@ def _check_global_escalations(intake: dict[str, Any]) -> tuple[str, str] | None:
     Triggers 8-11 (esc-serious-injury, esc-workers-comp, esc-govt-defendant,
     esc-limitation) are gated by claim_type per spec §1.4. Trigger 12
     (esc-uninsured-driver) applies to motor + property_damage."""
-    # 1. esc-injury: any injury reported. (injuries: "none" is parsed as string
-    # "none" and is therefore not positive.)
+    # 1. esc-injury: any injury reported.
+    #
+    # P1-1 fix (2026-07-14 review): fail-closed. The previous literal match
+    # (`inj in ("serious","minor",...)`) let any non-enum truthy value
+    # (`"yes"`, `True`, `"whiplash"`) pass through to banding. The slot enum
+    # is `{none, minor, serious}`, but /api/intake/{ref}/extras can set
+    # arbitrary values, future channels may call classify() directly, and
+    # CD-R2 PD §1 defines the invariant as "ANY injury mention". So: anything
+    # that isn't exactly "none" (case-insensitive) or absent escalates.
     inj = intake.get("injuries")
-    if inj in ("serious", "minor", "Serious", "Minor"):
-        return ("esc-injury", f"injury reported: {inj}")
+    if inj is not None and not (isinstance(inj, str) and inj.strip().lower() == "none"):
+        return ("esc-injury", f"injury reported: {inj!r}")
     # 2. esc-hitrun
     if is_positive(intake.get("hit_and_run")):
         return ("esc-hitrun", "hit-and-run indicated")
@@ -996,11 +1022,18 @@ def _check_global_escalations(intake: dict[str, Any]) -> tuple[str, str] | None:
         if defendant in ("council", "public_authority", "government", "public_hospital"):
             return ("esc-govt-defendant", f"government/public defendant: {defendant}")
 
-    # 11. esc-limitation: incident date > LIMITATION_BUFFER_YEARS ago.
-    # Applies to PL and med-neg (limitation differs from motor CTP). Buffer
-    # keeps a margin under the standard limitation period.
+    # 11. esc-limitation: incident date beyond the limitation horizon.
+    # Applies to PL, med-neg, AND PD (P1-2 fix, 2026-07-14 review). PD was
+    # previously exempt — an NT intake 4 years old (past NT's 3-yr limitation)
+    # would band 'likely', telling a statute-barred customer "we can run that
+    # recovery for you". Now: per-state PD horizons (NT 3yr - 6mo buffer;
+    # others 6yr - 6mo buffer); PL/med-neg keep the original constant.
     if claim_type in ("public_liability", "medical_negligence"):
         lim = _check_limitation(intake)
+        if lim is not None:
+            return lim
+    elif claim_type == "property_damage":
+        lim = _check_pd_limitation(intake)
         if lim is not None:
             return lim
 
@@ -1029,6 +1062,28 @@ def _check_limitation(intake: dict[str, Any]) -> tuple[str, str] | None:
     age_years = (now - parsed).total_seconds() / (365.25 * 24 * 3600)
     if age_years > LIMITATION_BUFFER_YEARS:
         return ("esc-limitation", f"incident {age_years:.1f} yrs old > {LIMITATION_BUFFER_YEARS} yr buffer")
+    return None
+
+
+def _check_pd_limitation(intake: dict[str, Any]) -> tuple[str, str] | None:
+    """Per-state PD limitation check (P1-2 fix). NT uses a 3-year horizon;
+    all other AU states use 6 years. A 6-month safety buffer is subtracted
+    so the engine never emits a band within 6 months of the statutory bar.
+    Returns (esc-limitation, reason) if past the horizon, else None."""
+    raw = intake.get("incident_date")
+    if not raw or not isinstance(raw, str):
+        return None
+    parsed = _parse_incident_date(raw)
+    if parsed is None:
+        return None
+    now = datetime.now(timezone.utc)
+    age_years = (now - parsed).total_seconds() / (365.25 * 24 * 3600)
+    state = (intake.get("state") or "NSW").upper()
+    horizon = PD_LIMITATION_YEARS_BY_STATE.get(state, PD_LIMITATION_DEFAULT_YEARS)
+    if age_years > horizon:
+        return ("esc-limitation",
+                f"PD incident {age_years:.1f} yrs old > {horizon:.1f} yr "
+                f"({state} limitation horizon)")
     return None
 
 

@@ -1,5 +1,5 @@
 PERSONAL-INJURY EXTENSION TEST REPORT
-Generated: 2026-07-14T12:26:55.984839Z
+Generated: 2026-07-14T12:42:06.106691Z
 Spec: claimdesk-injury-extension-INSTRUCTIONS-2026-07-03.md
 
 ================================================================================
@@ -15,6 +15,8 @@ Spec: claimdesk-injury-extension-INSTRUCTIONS-2026-07-03.md
 [PASS] IX-10   motor intake without claim_type → s1-rear-end, band='likely' (tree signed 2026-07-05)
 [PASS] IX-11   all 7 PD scenarios → unsigned-scenario (across 10 collision-type aliases, via patched unsigned tree)
 [PASS] IX-12   all PD collision types × {minor,serious} → esc-injury, no band (firewall holds)
+[PASS] IX-12a  fail-closed: 10 non-enum injury values all → esc-injury; 'none' still bands normally
+[PASS] IX-12b  NT 4yr→esc-limitation; NSW 4yr bands; NSW/NT 7yr→esc-limitation; all 6yr-states 7yr→esc-limitation
 [PASS] IX-13   esc-uninsured-driver fires for yes/unsure, not for 'no'
 [PASS] IX-14   PD hash changed (1f13feba → 72c88661); motor/PL/med-neg hashes stable
 [PASS] IX-15   signed PD bands deterministically: clear=likely, following=possible, other=unclear
@@ -30,4 +32,4 @@ Spec: claimdesk-injury-extension-INSTRUCTIONS-2026-07-03.md
 [PASS] IX-25   QLD mutation isolated; 4 PD state hashes distinct (['1f13feba', '5ebd4117', 'c6092790', 'fc61fc3e'])
 [PASS] IX-26   SA/TAS/ACT/NT route + signed bands; NT 3yr flagged; 8 PD hashes distinct (['1f13feba', '5ebd4117', 'c6092790', 'fc61fc3e', '9b7b7785', 'fa87ce40', '83ad5642', 'e8634d23'])
 ================================================================================
-TOTAL: 26  PASS: 26  FAIL: 0
+TOTAL: 28  PASS: 28  FAIL: 0

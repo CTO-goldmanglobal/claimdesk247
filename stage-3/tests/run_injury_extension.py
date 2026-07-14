@@ -391,6 +391,94 @@ def _test_pd_injury_firewall() -> tuple[bool, str]:
     return True, "all PD collision types × {minor,serious} → esc-injury, no band (firewall holds)"
 
 
+def _test_injury_firewall_fail_closed() -> tuple[bool, str]:
+    """IX-12 P1-1 fix (2026-07-14 review): the injury firewall MUST fail closed.
+    Pre-fix the engine matched literally (serious|minor only), so any non-enum
+    truthy value (`yes`, `True`, `whiplash`, `1`) bypassed the firewall and
+    got a band. Now: anything that isn't exactly 'none' (case-insensitive) or
+    absent escalates as esc-injury. This is the CD-R2 PD §1 'any injury
+    mention' invariant."""
+    violations = []
+    # PD clear rear-end intake that would normally band 'likely'.
+    base = _base_intake("property_damage")
+    base["collision_type"] = "rear-end"
+    base["user_position"] = "front"
+    base["user_motion"] = "stopped"
+    base["chain_count"] = 2
+    # Sanity: with injuries='none' this bands likely (proves the test setup).
+    er_none = classify({**base, "injuries": "none"})
+    if er_none.escalation == "esc-injury" or er_none.band is None:
+        return False, (f"baseline broken: injuries='none' should band, got "
+                       f"esc={er_none.escalation!r} band={er_none.band!r}")
+    # Each of these MUST escalate — fail-closed.
+    for inj in ("yes", True, 1, "whiplash", "hospitalised", "minor ", "SERIOUS",
+                "unknown", "maybe", "y", "t"):
+        er = classify({**base, "injuries": inj})
+        if er.escalation != "esc-injury":
+            violations.append(f"injuries={inj!r}: expected esc-injury, "
+                              f"got esc={er.escalation!r} band={er.band!r}")
+        if er.band is not None:
+            violations.append(f"injuries={inj!r}: emitted band={er.band!r} (forbidden)")
+    # Absent injuries should NOT trip the firewall (none of the firewall tests
+    # in this suite set injuries on the no-injury path).
+    # (Note: 'None' value is treated as absent → not injury-positive.)
+    if violations:
+        return False, "; ".join(violations)
+    return True, ("fail-closed: 10 non-enum injury values all → esc-injury; "
+                  "'none' still bands normally")
+
+
+def _test_pd_limitation_per_state() -> tuple[bool, str]:
+    """IX-12b P1-2 fix (2026-07-14 review): per-state PD limitation enforcement.
+    NT has a 3-year limitation (Limitation Act 1981); all other AU states 6
+    years. Pre-fix, PD was exempt from esc-limitation — an NT intake 4 years
+    old (statute-barred) would band 'likely'. Now: NT > 2.5 yr → esc-limitation;
+    NSW > 5.5 yr → esc-limitation; recent intakes still band normally."""
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    # 4 years ago — past NT's 3yr bar (with our 6mo buffer = 2.5yr horizon).
+    four_yr_ago = (now - timedelta(days=365 * 4)).strftime("%Y-%m-%d")
+    # 1 year ago — well within every state's horizon.
+    one_yr_ago = (now - timedelta(days=365)).strftime("%Y-%m-%d")
+    # 7 years ago — past everyone's 6yr bar.
+    seven_yr_ago = (now - timedelta(days=365 * 7)).strftime("%Y-%m-%d")
+
+    base = _base_intake("property_damage")
+    base["collision_type"] = "rear-end"
+    base["user_position"] = "front"
+    base["user_motion"] = "stopped"
+    base["chain_count"] = 2
+
+    violations = []
+    # NT 4yr → statute-barred → esc-limitation.
+    er = classify({**base, "state": "NT", "incident_date": four_yr_ago})
+    if er.escalation != "esc-limitation":
+        violations.append(f"NT 4yr: expected esc-limitation, got {er.escalation!r} band={er.band!r}")
+    if er.band is not None:
+        violations.append(f"NT 4yr: emitted band={er.band!r} (forbidden — statute-barred)")
+    # NSW 4yr → within 6yr → should band normally.
+    er = classify({**base, "state": "NSW", "incident_date": four_yr_ago})
+    if er.escalation == "esc-limitation":
+        violations.append(f"NSW 4yr: should band, got esc-limitation")
+    # NSW 7yr → past 6yr → esc-limitation.
+    er = classify({**base, "state": "NSW", "incident_date": seven_yr_ago})
+    if er.escalation != "esc-limitation":
+        violations.append(f"NSW 7yr: expected esc-limitation, got {er.escalation!r}")
+    # NT 1yr → within 3yr → bands normally.
+    er = classify({**base, "state": "NT", "incident_date": one_yr_ago})
+    if er.escalation == "esc-limitation":
+        violations.append(f"NT 1yr: should band, got esc-limitation")
+    # All states 7yr → esc-limitation.
+    for st in ("VIC", "QLD", "WA", "SA", "TAS", "ACT"):
+        er = classify({**base, "state": st, "incident_date": seven_yr_ago})
+        if er.escalation != "esc-limitation":
+            violations.append(f"{st} 7yr: expected esc-limitation, got {er.escalation!r}")
+    if violations:
+        return False, "; ".join(violations)
+    return True, ("NT 4yr→esc-limitation; NSW 4yr bands; NSW/NT 7yr→esc-limitation; "
+                  "all 6yr-states 7yr→esc-limitation")
+
+
 def _test_pd_uninsured_driver_trigger() -> tuple[bool, str]:
     """The PD-specific esc-uninsured-driver trigger fires when the at-fault
     driver is uninsured or cover is unknown — recovery shifts to the user's
@@ -798,6 +886,8 @@ CASES: list[tuple[str, Callable[[], tuple[bool, str]]]] = [
     # Property Damage (Lane 1 beachhead) — spec 2026-07-05
     ("IX-11", _test_pd_all_unsigned_escalate),
     ("IX-12", _test_pd_injury_firewall),
+    ("IX-12a", _test_injury_firewall_fail_closed),  # P1-1 fix
+    ("IX-12b", _test_pd_limitation_per_state),       # P1-2 fix
     ("IX-13", _test_pd_uninsured_driver_trigger),
     ("IX-14", _test_pd_hash_isolation_from_motor_and_others),
     ("IX-15", _test_pd_signed_bands_deterministically),
