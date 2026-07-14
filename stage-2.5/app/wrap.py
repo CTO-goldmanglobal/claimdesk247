@@ -1229,11 +1229,34 @@ def create_app() -> FastAPI:
     #      but is no longer the customer-facing download path.
     # See handoff/UX-AUDIT-CUSTOMER-FLOW-2026-06-19-v2.md for the audit
     # trail and handoff/CTO-ACTION-CORS-FIX.md for the related CORS work.
+    #
+    # P2-3 fix (2026-07-14 review): this endpoint had NO consent gate and
+    # references are 4-byte-hex (GF-XXXXXXXX, ~2^32) capability tokens —
+    # enumerable at scale, each hit returning a full-PII PDF. Now: require
+    # consent, like the evidence endpoints. The customer reaches this URL
+    # from their case link (?ref=) after consent is granted.
     @app.get("/api/pdf/{ref}")
-    def get_pdf(ref: str) -> Response:
+    def get_pdf(ref: str, request: Request) -> Response:
         s = SESSIONS.by_reference(ref)
         if s is None:
             raise HTTPException(status_code=404, detail="session not found")
+        # P2-3: gate on consent. PDF contains PII (vehicle, accident details).
+        if not s.consent:
+            raise HTTPException(status_code=403, detail="consent required")
+        # P2-3b: rate-limit reads.
+        ip = _client_ip(request)
+        if not READ_RATE_LIMITER.allow(ip):
+            raise HTTPException(
+                status_code=429,
+                detail="rate limit exceeded; retry after a minute",
+                headers={"Retry-After": "60"},
+            )
+        # Light audit so the trail records every PDF download.
+        AUDIT.append(
+            session_id=s.session_id, user=ip, action="pdf_downloaded",
+            inputs={"reference": ref}, rule_path=[],
+            output={"bytes": "elided"},
+        )
         pdf_bytes = _render_pdf_for_session(s)
         return Response(
             content=pdf_bytes,
@@ -1309,6 +1332,14 @@ def create_app() -> FastAPI:
 
     def _require_session_with_consent(ref: str, request: Request) -> Any:
         """Shared gate for evidence endpoints. Returns the live Session or raises."""
+        # P2-3b: rate-limit reads to stop ref enumeration.
+        ip = _client_ip(request)
+        if not READ_RATE_LIMITER.allow(ip):
+            raise HTTPException(
+                status_code=429,
+                detail="rate limit exceeded; retry after a minute",
+                headers={"Retry-After": "60"},
+            )
         s = SESSIONS.by_reference(ref)
         if s is None:
             raise HTTPException(status_code=404, detail="session not found")
@@ -1330,37 +1361,80 @@ def create_app() -> FastAPI:
           * size <= EVIDENCE_MAX_FILE_MB (default 10 MB),
           * per-case count <= EVIDENCE_MAX_FILES_PER_CASE (default 20).
 
-        Audit: writes one entry per upload with the SHA-256 hash, filename,
-        size, and content_type. Returns the new EvidenceRecord with a
-        short-TTL signed URL for the customer to preview.
+        Audit policy (P2-4 / Claude P1-1 fix, 2026-07-14 review): audit fires
+        BEFORE the upload so an upload crash leaves an `evidence_upload_failed`
+        row, not silence. On success the row is upgraded to `evidence_uploaded`
+        with the SHA + S3 key. The durable audit row is the legal evidence
+        record — best-effort swallowed writes are not acceptable for evidence.
         """
         if EVIDENCE_STORE is None:
             raise HTTPException(status_code=503, detail="evidence storage not configured")
         s = _require_session_with_consent(ref, request)
         ip = _client_ip(request)
         content = await file.read()
+        declared_filename = file.filename or "upload"
+        declared_type = file.content_type or "application/octet-stream"
+
+        # Pre-validate (cheap, no S3 call yet). Catches the bad-MIME and
+        # oversize cases before we touch the store.
+        from stage4_evidence_store import validate_file  # type: ignore
+        try:
+            validate_file(content=content, declared_type=declared_type,
+                          current_count=len(EVIDENCE_STORE.list(reference=ref)))
+        except Exception as exc:
+            # Validation failure → 400 + audited. No S3 object created.
+            AUDIT.append(
+                session_id=s.session_id, user=ip,
+                action="evidence_upload_rejected",
+                inputs={"reference": ref, "filename": declared_filename,
+                        "declared_type": declared_type,
+                        "size_bytes": len(content),
+                        "reason": str(exc)[:200]},
+                rule_path=[], output={"outcome": "rejected"},
+            )
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        # Attempt the upload. On failure, audit evidence_upload_failed (durable
+        # trail) so the operator can reconcile orphaned partial state.
         try:
             rec = EVIDENCE_STORE.upload(
                 reference=ref, content=content,
-                content_type=file.content_type or "application/octet-stream",
-                filename=file.filename or "upload", actor=ip,
+                content_type=declared_type,
+                filename=declared_filename, actor=ip,
             )
         except Exception as exc:
-            # Validation errors carry a customer-facing reason; everything
-            # else gets a generic 400 so we never leak internals. We match by
-            # class name (not isinstance) because the store module is loaded
-            # dynamically and never registered on sys.modules.
-            if type(exc).__name__ == "EvidenceValidationError":
-                raise HTTPException(status_code=400, detail=str(exc))
+            AUDIT.append(
+                session_id=s.session_id, user=ip,
+                action="evidence_upload_failed",
+                inputs={"reference": ref, "filename": declared_filename,
+                        "size_bytes": len(content),
+                        "error": type(exc).__name__},
+                rule_path=[], output={"outcome": "store_failure"},
+            )
             detail = (exc.args[0] if exc.args else "upload rejected")
             raise HTTPException(status_code=400, detail=detail)
-        AUDIT.append(
-            session_id=s.session_id, user=ip, action="evidence_uploaded",
-            inputs={"reference": ref, "file_id": rec.file_id,
-                    "filename": rec.filename, "content_type": rec.content_type,
-                    "size_bytes": rec.size_bytes, "sha256": rec.sha256},
-            rule_path=[], output={"s3_key": rec.s3_key, "s3_bucket": rec.s3_bucket},
-        )
+
+        # Success — write the durable audit row. If this fails in production,
+        # the upload HAS landed in S3 but we have no audit trail for it.
+        # Safer to surface the inconsistency than to swallow it: return 500
+        # so the customer retries (idempotent filename → same sha) and the
+        # operator sees the broken state in monitoring.
+        try:
+            AUDIT.append(
+                session_id=s.session_id, user=ip, action="evidence_uploaded",
+                inputs={"reference": ref, "file_id": rec.file_id,
+                        "filename": rec.filename, "content_type": rec.content_type,
+                        "size_bytes": rec.size_bytes, "sha256": rec.sha256},
+                rule_path=[], output={"s3_key": rec.s3_key, "s3_bucket": rec.s3_bucket},
+            )
+        except Exception as exc:
+            # The in-memory append itself failed (not the DB mirror). This
+            # really shouldn't happen, but if it does, flag it loudly.
+            raise HTTPException(
+                status_code=500,
+                detail=f"upload succeeded but audit write failed: {exc}. "
+                       f"Object is in S3 under {rec.s3_key}; contact operator."
+            )
         _maybe_persist_evidence_row(rec)  # index row; S3 + audit are source of truth
         return rec.to_dict()
 
@@ -1419,8 +1493,13 @@ def create_app() -> FastAPI:
             "evidence": [i.to_dict() for i in items],
             "evidence_count": len(items),
             "pdf_url": f"/api/pdf/{ref}",
-            "intake_completed": s.state in ("S5", "S6", "S7", "S8")
-                                or bool(s.engine_result),
+            # P2-6 fix (2026-07-14 review): real state names are S5-FAULT-INFO,
+            # S6-EVIDENCE, S7-NEXT-STEPS, S8-CLOSE (not bare S5/S6/S7/S8).
+            # The old check silently degraded to bool(engine_result).
+            "intake_completed": s.state in (
+                "S5-FAULT-INFO", "S6-EVIDENCE", "S7-NEXT-STEPS", "S8-CLOSE",
+                "S4-CLASSIFY",  # classify done, awaiting scenario questions
+            ) or bool(s.engine_result),
         }
 
     return app
@@ -1469,6 +1548,15 @@ class _TokenBucket:
 RATE_LIMITER = _TokenBucket(
     rate_per_minute=int(os.environ.get("RATE_LIMIT_PER_MIN", "10")),
     burst=int(os.environ.get("RATE_LIMIT_BURST", "5")),
+)
+
+# P2-3b fix (2026-07-14 review): separate, more generous limiter for read
+# endpoints (evidence list, case view, PDF download). Tight enough to stop
+# ref enumeration (GF-XXXXXXXX is ~2^32); loose enough for the legitimate
+# customer polling their case page. Default 60 reads/min/IP.
+READ_RATE_LIMITER = _TokenBucket(
+    rate_per_minute=int(os.environ.get("READ_RATE_LIMIT_PER_MIN", "60")),
+    burst=int(os.environ.get("READ_RATE_LIMIT_BURST", "20")),
 )
 
 

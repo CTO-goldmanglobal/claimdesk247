@@ -224,12 +224,21 @@ class S3EvidenceStore:
         key = f"{reference}/{file_id}.{ext}"
         digest = sha256_hex(content)
         # SSE-KMS, always on. AWS-managed key by default; CMK if provided.
+        # P2-1 fix (2026-07-14 review): also persist sha256, original
+        # filename, and actor as object metadata so the S3-source-of-truth
+        # read (DR / list-from-S3) returns complete records.
         put_args: dict[str, Any] = {
             "Bucket": self._bucket,
             "Key": key,
             "Body": content,
             "ContentType": canonical,
             "ServerSideEncryption": "aws:kms",
+            "Metadata": {
+                "sha256": digest,
+                "original-filename": filename[:200],  # S3 metadata value cap
+                "uploaded-by": (actor or "")[:200],
+                "reference": reference,
+            },
         }
         if self._kms_key_id:
             put_args["SSEKMSKeyId"] = self._kms_key_id

@@ -282,7 +282,7 @@ def submit_slot(session: Session, slot_id: int, value: Any) -> dict[str, Any]:
         if session.reprompts[slot_def["slot"]] > REPROMPT_CAP:
             # Offer human callback
             session.state = "SX-ESCALATE"
-            session.escalation = "repompt-cap"
+            session.escalation = "reprompt-cap"
             session.escalation_reason = f"max re-prompts on slot {slot_def['slot']}"
             session.reference = _new_reference()
             return {

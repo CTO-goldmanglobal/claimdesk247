@@ -140,6 +140,42 @@ def _soft_delete_metadata(reference: str, file_ids: list[str]) -> None:
               file=sys.stderr)
 
 
+def _write_purge_audit(reference: str, deleted_ids: list[str], horizon_iso: str,
+                       job_id: str) -> None:
+    """P1-8 fix (2026-07-14 review): write one audit_log row per retention
+    purge so the trail records who/what/when for evidence destruction.
+    Without this the S3 object vanishes with no application-side trace, which
+    breaks the audit chain the privacy notice promises. Best-effort: the S3
+    delete already happened; warning on audit failure."""
+    url = os.environ.get("SUPABASE_URL")
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    if not (url and key) or not deleted_ids:
+        return
+    try:
+        from supabase import create_client  # type: ignore
+        sb = create_client(url, key)
+        now = datetime.now(timezone.utc).isoformat()
+        # One row per purged file — the audit_log is append-only.
+        rows = [{
+            "session_id": reference,        # use reference as the session key
+            "actor": f"retention-job:{job_id}",
+            "action": "evidence_retention_purged",
+            "inputs": {
+                "reference": reference, "file_id": fid,
+                "horizon": horizon_iso, "job_id": job_id,
+            },
+            "rule_path": [],
+            "output": {"outcome": "purged"},
+            "created_at": now,
+        } for fid in deleted_ids]
+        # insert in a single batch; the audit_log append trigger (0003) allows
+        # service_role to write.
+        sb.table("audit_log").insert(rows).execute()
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARNING: purge audit write failed for {reference}: {exc}",
+              file=sys.stderr)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dry-run", action="store_true",
@@ -151,7 +187,10 @@ def main() -> int:
     args = parser.parse_args()
 
     horizon = datetime.now(timezone.utc) - timedelta(days=args.retention_days)
+    # Stable-ish job id so audit rows from one run can be grouped.
+    job_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     print(f"Evidence retention purge")
+    print(f"  job id:  {job_id}")
     print(f"  horizon: cases older than {horizon.isoformat()} "
           f"({args.retention_days} days)")
     print(f"  mode:    {'DRY-RUN' if args.dry_run else 'LIVE'}")
@@ -192,7 +231,10 @@ def main() -> int:
             continue
         if deleted_ids:
             print(f"  {ref}: purged {len(deleted_ids)} object(s)")
-            _soft_delete_metadata(ref, deleted_ids)
+            if not args.dry_run:
+                _soft_delete_metadata(ref, deleted_ids)
+                # P1-8: write one audit row per purged file.
+                _write_purge_audit(ref, deleted_ids, horizon.isoformat(), job_id)
             total_purged += len(deleted_ids)
     print()
     print(f"Total {'that would be ' if args.dry_run else ''}purged: "

@@ -94,11 +94,16 @@ returns trigger
 language plpgsql
 as $$
 begin
+    -- P2-7 fix (2026-07-14 review): uploaded_by and uploaded_at MUST be in
+    -- the immutable set — otherwise an UPDATE can rewrite who/when for an
+    -- evidence row while claiming integrity (breaks the audit chain).
     if new.content_hash_sha256 is distinct from old.content_hash_sha256
        or new.s3_key is distinct from old.s3_key
        or new.size_bytes is distinct from old.size_bytes
        or new.content_type is distinct from old.content_type
-       or new.reference is distinct from old.reference then
+       or new.reference is distinct from old.reference
+       or new.uploaded_by is distinct from old.uploaded_by
+       or new.uploaded_at is distinct from old.uploaded_at then
         raise exception 'case_evidence integrity fields are immutable'
             using errcode = '0A000';
     end if;
