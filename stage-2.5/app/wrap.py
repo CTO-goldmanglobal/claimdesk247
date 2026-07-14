@@ -105,7 +105,7 @@ else:
     sys.modules["app"] = _preserved_app
 
 # FastAPI
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -136,6 +136,61 @@ def _build_sessions() -> Any:
 
 
 SESSIONS = _build_sessions()
+
+
+# ----- Evidence store (Feature 2 — photo upload bound to case file) -----
+# Same pattern as _build_sessions(): load the stage-4 adapter if a Supabase
+# project is configured, else fall back to the in-memory dev store. The store
+# is consent-gated in the HTTP layer (see /api/intake/{ref}/evidence) and
+# every upload/list/delete writes to AUDIT below.
+def _build_evidence_store() -> Any:
+    _store_path = _STAGE25_ROOT.parent / "stage-4" / "app" / "evidence_store.py"
+    if not _store_path.exists():
+        return None
+    # Register on sys.modules BEFORE exec so @dataclass inside the module can
+    # resolve its own __module__ (Python 3.9 dataclasses needs this; the
+    # session-store adapter avoids it because its stage3 modules register
+    # themselves via the same pattern). Alias under a unique name to avoid
+    # colliding with stage-3's `app` package.
+    _alias = "stage4_evidence_store"
+    _spec_e = importlib.util.spec_from_file_location(_alias, _store_path)
+    _mod_e = importlib.util.module_from_spec(_spec_e)
+    sys.modules[_alias] = _mod_e
+    _spec_e.loader.exec_module(_mod_e)
+    return _mod_e.build_evidence_store()
+
+
+EVIDENCE_STORE = _build_evidence_store()
+
+
+def _maybe_persist_evidence_row(rec: Any) -> None:
+    """Best-effort write of the case_evidence metadata row.
+
+    Only fires when the active session store exposes its Supabase client (i.e.
+    production/staging). The test runner (InMemory) has no DB to write to and
+    skips silently — the test suite asserts against the audit_log + the store
+    return value, which are both storage-agnostic. Failures here are swallowed
+    so a metadata hiccup can never break the upload path (the audit_log +
+    S3 object are the source of truth; this row is an index).
+    """
+    try:
+        client = getattr(SESSIONS, "_client", None)
+        if client is None:
+            return
+        client.table("case_evidence").insert({
+            "evidence_id": rec.file_id,
+            "reference": rec.reference,
+            "s3_key": rec.s3_key,
+            "s3_bucket": rec.s3_bucket,
+            "content_type": rec.content_type,
+            "size_bytes": rec.size_bytes,
+            "content_hash_sha256": rec.sha256,
+            "uploaded_by": rec.uploaded_by,
+            "uploaded_at": rec.uploaded_at,
+            "storage_class": rec.storage_class,
+        }).execute()
+    except Exception:
+        pass
 
 
 class _PersistingAudit:
@@ -1052,6 +1107,134 @@ def create_app() -> FastAPI:
             rule_path=[], output={"fields_count": len(brief.to_dict())},
         )
         return brief.to_dict()
+
+    # ============================================================
+    # Feature 2 — Evidence upload bound to the case file
+    # (POST/GET /api/intake/{ref}/evidence, GET /api/case/{ref})
+    # ============================================================
+    #
+    # Compliance: every path below is consent-gated server-side (403 if the
+    # session hasn't passed /api/consent — same gate as /api/slot). Every
+    # upload, list-read, and signed-URL issuance writes to the immutable
+    # audit_log. Files live in Supabase Storage (Sydney region), private
+    # bucket; reads only via short-TTL signed URLs minted here. Object paths
+    # are {reference}/{uuid}.{ext} — no PII in URLs.
+
+    def _require_session_with_consent(ref: str, request: Request) -> Any:
+        """Shared gate for evidence endpoints. Returns the live Session or raises."""
+        s = SESSIONS.by_reference(ref)
+        if s is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        # Consent check is SERVER-SIDE — the UI cannot bypass it. Same gate
+        # as /api/slot returns 400 for, but the evidence contract uses 403
+        # (forbidden) because the resource exists but the caller may not touch it.
+        if not s.consent:
+            raise HTTPException(status_code=403, detail="consent required")
+        return s
+
+    @app.post("/api/intake/{ref}/evidence")
+    async def post_evidence(ref: str, request: Request,
+                            file: UploadFile = File(...)) -> Any:
+        """Upload ONE image file and bind it to the case reference.
+
+        Multipart/form-data; field name `file`. Validates:
+          * session exists AND consent granted (403 otherwise),
+          * file content sniffs as an allowed image MIME,
+          * size <= EVIDENCE_MAX_FILE_MB (default 10 MB),
+          * per-case count <= EVIDENCE_MAX_FILES_PER_CASE (default 20).
+
+        Audit: writes one entry per upload with the SHA-256 hash, filename,
+        size, and content_type. Returns the new EvidenceRecord with a
+        short-TTL signed URL for the customer to preview.
+        """
+        if EVIDENCE_STORE is None:
+            raise HTTPException(status_code=503, detail="evidence storage not configured")
+        s = _require_session_with_consent(ref, request)
+        ip = _client_ip(request)
+        content = await file.read()
+        try:
+            rec = EVIDENCE_STORE.upload(
+                reference=ref, content=content,
+                content_type=file.content_type or "application/octet-stream",
+                filename=file.filename or "upload", actor=ip,
+            )
+        except Exception as exc:
+            # Validation errors carry a customer-facing reason; everything
+            # else gets a generic 400 so we never leak internals. We match by
+            # class name (not isinstance) because the store module is loaded
+            # dynamically and never registered on sys.modules.
+            if type(exc).__name__ == "EvidenceValidationError":
+                raise HTTPException(status_code=400, detail=str(exc))
+            detail = (exc.args[0] if exc.args else "upload rejected")
+            raise HTTPException(status_code=400, detail=detail)
+        AUDIT.append(
+            session_id=s.session_id, user=ip, action="evidence_uploaded",
+            inputs={"reference": ref, "file_id": rec.file_id,
+                    "filename": rec.filename, "content_type": rec.content_type,
+                    "size_bytes": rec.size_bytes, "sha256": rec.sha256},
+            rule_path=[], output={"s3_key": rec.s3_key, "s3_bucket": rec.s3_bucket},
+        )
+        _maybe_persist_evidence_row(rec)  # index row; S3 + audit are source of truth
+        return rec.to_dict()
+
+    @app.get("/api/intake/{ref}/evidence")
+    def get_evidence(ref: str, request: Request) -> Any:
+        """List evidence files bound to the case (consent-gated).
+
+        Each item includes a freshly-minted signed URL (short TTL). The list
+        itself is audited so a leak of the customer's reference is detectable
+        from the trail even if no file is read.
+        """
+        if EVIDENCE_STORE is None:
+            raise HTTPException(status_code=503, detail="evidence storage not configured")
+        s = _require_session_with_consent(ref, request)
+        ip = _client_ip(request)
+        items = EVIDENCE_STORE.list(reference=ref)
+        AUDIT.append(
+            session_id=s.session_id, user=ip, action="evidence_listed",
+            inputs={"reference": ref}, rule_path=[],
+            output={"count": len(items), "file_ids": [i.file_id for i in items]},
+        )
+        return {"reference": ref, "count": len(items),
+                "items": [i.to_dict() for i in items]}
+
+    @app.get("/api/case/{ref}")
+    def get_case(ref: str, request: Request) -> Any:
+        """Return the bound case file: intake session + evidence list + pdf ref.
+
+        Same consent gate as the evidence endpoints — the customer reaches
+        this view from their `?ref=<ref>` link after granting consent. Staff
+        views go through the dashboard (separate, role-gated). The PDF is
+        referenced as a link (not embedded) so the customer can re-download
+        without re-running /api/classify.
+        """
+        s = _require_session_with_consent(ref, request)
+        items = []
+        if EVIDENCE_STORE is not None:
+            try:
+                items = EVIDENCE_STORE.list(reference=ref)
+            except Exception:
+                items = []
+        band = None
+        if s.engine_result:
+            band = s.engine_result.band
+        # Light audit — same surface as brief_viewed but customer-readable.
+        AUDIT.append(
+            session_id=s.session_id, user=_client_ip(request),
+            action="case_viewed",
+            inputs={"reference": ref}, rule_path=[],
+            output={"evidence_count": len(items), "band": band},
+        )
+        return {
+            "reference": ref,
+            "state": s.state,
+            "band": band,
+            "evidence": [i.to_dict() for i in items],
+            "evidence_count": len(items),
+            "pdf_url": f"/api/pdf/{ref}",
+            "intake_completed": s.state in ("S5", "S6", "S7", "S8")
+                                or bool(s.engine_result),
+        }
 
     return app
 

@@ -119,6 +119,33 @@ class HTTPClient:
             except Exception:
                 return r.status_code, r.text, dict(r.headers)
 
+    def upload(self, path: str, *, filename: str, content: bytes,
+               content_type: str = "application/octet-stream",
+               field: str = "file",
+               headers: dict | None = None) -> tuple[int, Any, dict]:
+        """multipart/form-data upload. Used by the evidence-upload tests."""
+        if self._mode == "local":
+            files = {field: (filename, content, content_type)}
+            r = self._test.request("POST", path, files=files, headers=headers)
+            ct = (r.headers.get("content-type") or "").lower()
+            if "application/json" in ct:
+                try:
+                    return r.status_code, r.json(), dict(r.headers)
+                except Exception:
+                    pass
+            return r.status_code, r.text, dict(r.headers)
+        else:
+            files = {field: (filename, content, content_type)}
+            r = self._session.request("POST", self._base + path, files=files,
+                                      headers=headers)
+            ct = (r.headers.get("content-type") or "").lower()
+            if "application/json" in ct:
+                try:
+                    return r.status_code, r.json(), dict(r.headers)
+                except Exception:
+                    pass
+            return r.status_code, r.text, dict(r.headers)
+
 
 # -----------------------------------------------------------------------
 # Helpers
@@ -582,6 +609,135 @@ def _drive_scenario_question_endpoint(client: HTTPClient, case: dict) -> tuple[b
     return True, "scenario-question endpoint: start -> user_position -> user_motion"
 
 
+# -----------------------------------------------------------------------
+# Feature 2 — Evidence upload (T-25-020..T-25-023)
+# Storage-agnostic: runs against InMemoryEvidenceStore locally and against
+# the configured S3 bucket over weblink. Validates the compliance contract:
+# consent-gated, audit-logged, image-only, size-capped.
+# -----------------------------------------------------------------------
+
+def _tiny_png() -> bytes:
+    """A valid 1x1 PNG (transparent). Used for the happy-path uploads."""
+    import struct, zlib
+    sig = b"\x89PNG\r\n\x1a\n"
+    ihdr_body = struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0)
+    ihdr_chunk = b"IHDR" + ihdr_body
+    ihdr = (struct.pack(">I", len(ihdr_body)) + ihdr_chunk
+            + struct.pack(">I", zlib.crc32(ihdr_chunk) & 0xffffffff))
+    raw = b"\x00" + b"\x00\x00\x00\x00"
+    comp = zlib.compress(raw)
+    idat_chunk = b"IDAT" + comp
+    idat = (struct.pack(">I", len(comp)) + idat_chunk
+            + struct.pack(">I", zlib.crc32(idat_chunk) & 0xffffffff))
+    iend_chunk = b"IEND"
+    iend = (struct.pack(">I", 0) + iend_chunk
+            + struct.pack(">I", zlib.crc32(iend_chunk) & 0xffffffff))
+    return sig + ihdr + idat + iend
+
+
+def _drive_evidence_pre_consent_403(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-EV: upload rejected before /api/consent -> 403 consent required."""
+    ref = _create_session(client)
+    png = _tiny_png()
+    code, body, _ = client.upload(f"/api/intake/{ref}/evidence",
+                                  filename="a.png", content=png,
+                                  content_type="image/png")
+    if code != 403:
+        return False, f"expected 403 before consent, got {code}: {body}"
+    detail = (body or {}).get("detail", "") if isinstance(body, dict) else str(body)
+    if "consent" not in str(detail).lower():
+        return False, f"403 but detail doesn't mention consent: {body}"
+    return True, f"upload rejected pre-consent (403: {detail})"
+
+
+def _drive_evidence_upload_and_audit(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-EV: upload after consent -> 200 + sha256 recorded + audit entry written."""
+    from app.wrap import AUDIT
+    ref = _create_session(client)
+    _accept_consent(client, ref)
+    before = len(AUDIT.all())
+    png = _tiny_png()
+    code, body, _ = client.upload(f"/api/intake/{ref}/evidence",
+                                  filename="damage-rear.png", content=png,
+                                  content_type="image/png")
+    if code != 200:
+        return False, f"upload failed: {code} {body}"
+    if not body.get("sha256") or len(body["sha256"]) != 64:
+        return False, f"sha256 missing/wrong: {body.get('sha256')}"
+    if not body.get("signed_url"):
+        return False, "signed_url missing on response"
+    if not body.get("s3_key", "").startswith(f"{ref}/"):
+        return False, f"s3_key not reference-keyed: {body.get('s3_key')}"
+    # Audit entry written with the file hash + actor
+    after = len(AUDIT.all())
+    if after != before + 1:
+        return False, f"audit count delta = {after - before} (expected 1)"
+    last = AUDIT.all()[-1]
+    if last.action != "evidence_uploaded":
+        return False, f"audit action = {last.action!r}"
+    if last.inputs.get("sha256") != body["sha256"]:
+        return False, "audit sha256 != response sha256 (chain mismatch)"
+    if "image" not in last.inputs.get("content_type", ""):
+        return False, f"audit content_type = {last.inputs.get('content_type')!r}"
+    return True, (f"upload ok: sha256={body['sha256'][:12]}…, "
+                  f"s3_key={body['s3_key']}, audit written")
+
+
+def _drive_evidence_list_after_upload(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-EV: list returns the uploaded evidence for the case."""
+    ref = _create_session(client)
+    _accept_consent(client, ref)
+    png = _tiny_png()
+    code, _, _ = client.upload(f"/api/intake/{ref}/evidence",
+                               filename="a.png", content=png,
+                               content_type="image/png")
+    if code != 200:
+        return False, f"setup upload failed: {code}"
+    code, body, _ = client.request("GET", f"/api/intake/{ref}/evidence")
+    if code != 200:
+        return False, f"list failed: {code} {body}"
+    if body.get("count") != 1:
+        return False, f"expected count=1, got {body.get('count')}"
+    items = body.get("items") or []
+    if not items or items[0].get("reference") != ref:
+        return False, f"list item wrong: {items}"
+    if not items[0].get("sha256"):
+        return False, "list item missing sha256"
+    # The case view should agree with the evidence list.
+    code2, case_body, _ = client.request("GET", f"/api/case/{ref}")
+    if code2 != 200:
+        return False, f"case view failed: {code2}"
+    if case_body.get("evidence_count") != 1:
+        return False, f"case view evidence_count = {case_body.get('evidence_count')}"
+    if case_body.get("pdf_url") != f"/api/pdf/{ref}":
+        return False, f"case pdf_url wrong: {case_body.get('pdf_url')}"
+    return True, f"list ok (count=1); case view bound (evidence_count=1, pdf linked)"
+
+
+def _drive_evidence_reject_nonimage_and_oversize(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-EV: non-image and oversize uploads both rejected with 400."""
+    ref = _create_session(client)
+    _accept_consent(client, ref)
+    # Non-image content (a text payload lying about its type).
+    code, body, _ = client.upload(f"/api/intake/{ref}/evidence",
+                                  filename="trick.png",
+                                  content=b"not an image at all",
+                                  content_type="image/png")
+    if code != 400:
+        return False, f"non-image should be 400, got {code}: {body}"
+    # Oversize: a payload that sniffs as JPEG but is too big.
+    code, body, _ = client.upload(f"/api/intake/{ref}/evidence",
+                                  filename="huge.jpg",
+                                  content=b"\xff\xd8\xff" + b"\x00" * (11 * 1024 * 1024),
+                                  content_type="image/jpeg")
+    if code != 400:
+        return False, f"oversize should be 400, got {code}: {body}"
+    detail = (body or {}).get("detail", "") if isinstance(body, dict) else str(body)
+    if "mb" not in str(detail).lower():
+        return False, f"oversize detail doesn't mention size: {body}"
+    return True, "non-image -> 400; oversize -> 400 (size mentioned)"
+
+
 DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-001": lambda c, x: _drive_classify_parity(c, x, REAR_END_INTAKE),
     "T-25-002": lambda c, x: _drive_classify_parity(c, x, GIVEWAY_INTAKE),
@@ -602,6 +758,11 @@ DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-017": _drive_brief_mfa_blocked,
     "T-25-018": _drive_brief_mfa_satisfied,
     "T-25-019": _drive_scenario_question_endpoint,  # T6
+    # ---- Feature 2: evidence upload (consent-gated, audit-logged, validated) ----
+    "T-25-020": _drive_evidence_pre_consent_403,
+    "T-25-021": _drive_evidence_upload_and_audit,
+    "T-25-022": _drive_evidence_list_after_upload,
+    "T-25-023": _drive_evidence_reject_nonimage_and_oversize,
 }
 
 

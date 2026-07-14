@@ -168,7 +168,48 @@ cases:
     - "POST /api/scenario-question (answer s1-q1) -> next scenario question"
   expect: { first: user_position, next: user_motion }
 
+# ---- Feature 2: photo evidence bound to case file (S3 Sydney two-tier) ----
+# Storage-agnostic: runs against InMemoryEvidenceStore locally and against the
+# configured S3 bucket over weblink. Validates the consent/audit/validation
+# contract described in stage-4/legal/EVIDENCE-UPLOAD-DESIGN-2026-07-14.md.
+
+- id: T-25-020
+  gate: G-EV
+  desc: "upload rejected before /api/consent -> 403"
+  flow:
+    - "POST /api/session"
+    - "POST /api/intake/:ref/evidence (multipart, before consent)"
+  expect: { http: 403, detail_contains: "consent" }
+
+- id: T-25-021
+  gate: G-EV
+  desc: "upload after consent -> 200 + sha256 recorded + audit entry written"
+  flow:
+    - "POST /api/session"
+    - "POST /api/consent (accept)"
+    - "POST /api/intake/:ref/evidence (multipart, image/png)"
+  expect: { http: 200, has: [sha256, s3_key, signed_url], audit_action: evidence_uploaded }
+
+- id: T-25-022
+  gate: G-EV
+  desc: "list returns uploaded evidence; case view binds reference + evidence + pdf"
+  flow:
+    - "POST /api/session + consent"
+    - "POST /api/intake/:ref/evidence"
+    - "GET /api/intake/:ref/evidence"
+    - "GET /api/case/:ref"
+  expect: { list_count: 1, case_evidence_count: 1, pdf_url_present: true }
+
+- id: T-25-023
+  gate: G-EV
+  desc: "non-image and oversize uploads rejected with 400"
+  flow:
+    - "POST /api/session + consent"
+    - "POST /api/intake/:ref/evidence (text body claiming image/png)"
+    - "POST /api/intake/:ref/evidence (11MB JPEG)"
+  expect: { non_image: 400, oversize: 400 }
+
 coverage_assertion:
-  gates_exercised: [G-41, G-42, G-43, G-44, G-45, G-46, G-47, G-48, G-49, G-57, G-T6]
+  gates_exercised: [G-41, G-42, G-43, G-44, G-45, G-46, G-47, G-48, G-49, G-57, G-T6, G-EV]
   parity_proven: true
   runnable_against_weblink: true

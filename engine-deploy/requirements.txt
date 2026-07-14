@@ -12,3 +12,9 @@ supabase>=2.4,<3
 # Server-side AAL2 verification on /api/brief (CR-5-05 / D-3): verify Supabase
 # ES256 access tokens via JWKS. The [crypto] extra pulls in `cryptography`.
 PyJWT[crypto]>=2.8,<3
+# Feature 2 (evidence upload): AWS S3 client. Lazy-imported in
+# stage-4/app/evidence_store.py so the test suite still runs without it
+# installed (the InMemoryEvidenceStore fallback handles tests); required for
+# the production S3 path. Pinned to >=1.34 for ap-southeast-2 + SSE-KMS
+# stability.
+boto3>=1.34

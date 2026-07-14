@@ -15,9 +15,18 @@ DATA_DIR = Path(__file__).parent / "data"
 
 
 # Dev stub values for tokens. Real values injected at Stage 5 deployment.
+#
+# CR-6-01 (2026-07-14): Operating entity for claimdesk247.com.au is
+# "ClaimDesk 247". Smash-repair services are provided by an accredited panel
+# shop; the launch-case partner is Petersham Prestige Smash Repairs, set via
+# the {{PANEL_SHOP_NAME}} token so partners can be swapped per case without
+# code edits. Goldman Forge Legal remains the upstream legal/firmware brand
+# (ForgeWright) and must not appear to customers as the operator of this site.
 STAGE2_TOKENS: dict[str, str] = {
     "{{PERSONA_NAME}}": "Alex",
-    "{{FIRM_NAME}}": "Goldman Forge Legal",
+    "{{FIRM_NAME}}": "ClaimDesk 247",
+    "{{OPERATOR_NAME}}": "ClaimDesk 247",
+    "{{PANEL_SHOP_NAME}}": "Petersham Prestige Smash Repairs",
     "{{FIRM_PHONE}}": "(02) 9000 0000",
     "{{CALLBACK_SLA}}": "during the next business day",
     "{{RETENTION_PERIOD}}": "7 years",
