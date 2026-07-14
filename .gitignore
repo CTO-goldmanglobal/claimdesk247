@@ -57,3 +57,5 @@ venv/
 # Local notes
 *.local
 scratch/
+.vercel
+.env*
