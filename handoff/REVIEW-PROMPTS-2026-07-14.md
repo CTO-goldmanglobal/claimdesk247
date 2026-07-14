@@ -69,6 +69,14 @@ changes; the build seat will implement.
 
 ## B. Frontend review prompt
 
+> **Note:** This prompt was refreshed 2026-07-14 after the PD disclosure wire
+> landed in the frontend chat. Question 1 now asks the reviewer to verify the
+> implementation rather than propose where it should go. The disclosure changes
+> are present in the `lovable-ui` submodule's working tree (6 modified files,
+> submodule HEAD still `c9a2906` until committed). When sending to a reviewer,
+> either commit the submodule first or tell the reviewer to read the working
+> tree, not just the committed HEAD.
+
 ```
 You are reviewing the FRONTEND of ClaimDesk 247 — a TanStack Start + Vite +
 shadcn/ui customer-facing site for a legal-tech product. Review for UX,
@@ -76,19 +84,22 @@ accessibility, security (XSS / PII leakage), legal-copy compliance, and
 architecture. Point at files; do not paste.
 
 Repo: CTO-goldmanglobal/claimdesk247, branch cursor/founding-state-claimdesk247
-HEAD: 9ed4ecf
+Parent HEAD: 9ed4ecf
 Frontend lives in: lovable-ui/ (submodule → CTO-goldmanglobal/claimdesk247-76a0b7de)
+Submodule HEAD: c9a2906 — BUT the PD disclosure wire (item below) is in the
+submodule's UNCOMMITTED working tree. Read the working tree, not just HEAD.
 
 SCOPE TO REVIEW (frontend only — backend is a separate review):
 - lovable-ui/src/routes/__root.tsx        — shell, footer, <head> meta, error boundary
 - lovable-ui/src/routes/index.tsx         — landing page (PD-first hero, NSW-branded)
 - lovable-ui/src/routes/intake.tsx        — chat-style intake widget (the "robot")
-- lovable-ui/src/routes/embed/intake.tsx  — embeddable variant
+- lovable-ui/src/routes/embed/intake.tsx  — embeddable variant (FULL DUPLICATE of intake, not an alias)
 - lovable-ui/src/routes/dashboard.tsx     — staff sign-in (legal_staff role)
 - lovable-ui/src/components/BandBadge.tsx
 - lovable-ui/src/components/EvidenceUploader.tsx
 - lovable-ui/src/lib/api/client.ts        — fetch wrapper, all endpoints
 - lovable-ui/src/lib/api/types.ts         — request/response shapes
+- lovable-ui/src/lib/api/preview-engine.ts — Vercel-preview stub (no backend)
 - lovable-ui/src/lib/config.ts            — FIRM_PHONE, PANEL_SHOP_NAME
 - lovable-ui/src/lib/image-resize.ts      — client-side 1600px / JPEG q80
 
@@ -96,33 +107,59 @@ WHAT THE FRONTEND DOES TODAY:
 1. Landing page leads with PD recovery ("Not at fault? We handle the whole recovery").
    Copy is NSW-branded in the footer ("NSW road-rule trained") and landing meta.
 2. /intake is a chat-style widget: loading → consent → question → classifying → result.
-   Supports ?ref=<ref> (share/resume) and ?embed=1 (iframe variant).
-3. /embed/intake is the dedicated embeddable route (same component, stripped chrome).
-4. EvidenceUploader appears after consent + classify, resizes client-side, uploads multipart.
-5. Dashboard is staff sign-in (legal_staff role → /api/brief/:ref, MFA-gated backend-side).
-6. Footer on every page: "Operated by ClaimDesk 247. Smash-repair services by {PANEL_SHOP_NAME}."
+   Supports ?ref=<ref> (share/resume), ?embed=1 (iframe variant), and
+   ?ct=<claim_type> (entry-point claim-type tag, used by the PD disclosure wire).
+3. /embed/intake is a FULL DUPLICATE of /intake (not an alias) — changes must be
+   applied to both files.
+4. PD disclosure wire (just landed, PD-COUNSEL-MEMO §3.3): when a flow is tagged
+   ?ct=property_damage, boot() calls GET /api/disclosure/property_damage?ref=<ref>
+   (fires pd_disclosure_presented on the backend) BEFORE showing consent; a
+   ConsentPanel renders the disclosure_text in a scrollable region and the consent
+   button is disabled until the reader scrolls to bottom OR checks "I have read
+   this". On disclosure-fetch failure the UI goes to the error state (fail-closed)
+   so consent can't fire an acknowledged event without a preceding presented.
+   Landing page PD-branded CTAs pass search={{ ct: "property_damage" }}.
+5. EvidenceUploader appears after consent + classify, resizes client-side, uploads multipart.
+6. Dashboard is staff sign-in (legal_staff role → /api/brief/:ref, MFA-gated backend-side).
+7. Footer on every page: "Operated by ClaimDesk 247. Smash-repair services by {PANEL_SHOP_NAME}."
 
 BACKEND CONTRACT THE FRONTEND CALLS (do not review these — just verify the calls):
 - POST /api/session {channel, ref?, consentGranted?} → {ref, consentRequired, consentGranted, next}
 - POST /api/consent {reference, accept}
 - POST /api/slot {ref, slot, value} → {next, progress}
 - POST /api/classify {ref} → {band, disclaimerText, escalation?, reference}
-- GET /api/disclosure/{claim_type}?ref=<ref> → {claim_type, disclosure_text}  ← NEW
+- GET /api/disclosure/{claim_type}?ref=<ref> → {claim_type, disclosure_text}  ← WIRED THIS SESSION
 - POST /api/intake/{ref}/evidence (multipart) → EvidenceItem
 - GET /api/intake/{ref}/evidence → {reference, count, items[]}
 - GET /api/case/{ref} → CaseFile
 
 REVIEW QUESTIONS:
-1. PD disclosure (NEW backend endpoint): the intake consent screen does NOT currently
-   fetch /api/disclosure/property_damage and render it above the consent button. For PD
-   intakes, the disclosure text MUST render above consent, scrollable-to-acknowledge,
-   and the consent button should be disabled until ack. Where exactly does this wire in
-   intake.tsx? Propose the placement and state-machine change.
+1. PD disclosure wire (JUST IMPLEMENTED — verify, don't propose placement):
+   the wire lives in intake.tsx + embed/intake.tsx (boot() + ConsentPanel).
+   Verify:
+   (a) The entry-point signal (?ct=property_damage) is the right gate — the engine
+       can't tell the frontend the claim type until AFTER consent (claim_type resolves
+       at slot 3), but the disclosure must fire pre-consent. Is tagging flows at the
+       landing CTA legally sufficient, or can a user reach /intake with no ct and
+       still intend a PD claim (defeating the disclosure)? What's the failure mode?
+   (b) Fail-closed behaviour: boot() sets stage="error" if getDisclosure() throws.
+       Is that the right call vs. e.g. retrying, or falling back to a generic notice?
+       Could a transient network blip lock a legitimate PD claimant out entirely?
+   (c) Audit-pair integrity: does the frontend guarantee getDisclosure() runs BEFORE
+       grantConsent() in every code path? Check boot() ordering and onConsent().
+       What if the user opens ?ref=<existing PD session with consent already granted>
+       — can the presented event fail to fire while acknowledged still does?
+   (d) The scroll-to-bottom gate uses a 12px tolerance. Does that hold on mobile
+       Safari with dynamic toolbars / zoom? Is the checkbox alone a sufficient
+       accessible fallback?
+   (e) embed/intake.tsx is a FULL DUPLICATE of intake.tsx. Are the two ConsentPanels
+       behaviourally identical? Any drift risk if one is updated and the other isn't?
 2. PII / data leakage: any path where PII (name, phone, accident details) ends up in a
    URL, a query string, an OG tag, or an error report? Check intake.tsx, client.ts,
-   lovable-error-reporting.ts.
+   lovable-error-reporting.ts. Note: ?ref= is opaque (not PII) — verify that holds.
 3. Accessibility: chat-style intake — is keyboard navigation complete? Focus traps?
    Screen-reader announce on new system messages? Color contrast on BandBadge?
+   Is the disclosure scroll-region keyboard-scrollable (tabIndex=0 is set — enough)?
 4. Legal-copy compliance: the engine emits bands (likely/possible/unclear/insufficient).
    Does the UI ever frame these as a conclusion ("you are at fault") rather than general
    information? Check BandBadge + result screen in intake.tsx. The disclaimer text must
@@ -135,6 +172,7 @@ REVIEW QUESTIONS:
    cap messaging.
 7. Embed mode: ?embed=1 / /embed/intake — any way for the host page to extract the user's
    ref or PII via postMessage, referrer, or URL? Verify the iframe is sandboxed correctly.
+   Does the new ?ct= leak anything to the host page via the URL?
 8. Performance: image-resize runs on the main thread. For 10MB HEIC files this can JANK
    the UI for seconds. Should it be a Web Worker?
 
