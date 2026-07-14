@@ -10,6 +10,19 @@ rule, wire the env vars into Vercel, and verify the upload pipeline end-to-end.
 
 ---
 
+## Data controller posture (Legal Head — for review)
+
+The AWS account owning `claimdesk247-evidence-prod` is **Goldman Global** (via Goldman Forge, its technology arm). ClaimDesk 247 is the **operator** of the website; Goldman Forge is the **technology provider** ("Powered by Goldman Forge" — see `disclaimers.v1.complete.json:pdf_footer` + `privacy_notice`). This is an intra-group hosting arrangement:
+
+- **Customer-facing operator:** ClaimDesk 247
+- **Technology provider (data processor):** Goldman Forge (Goldman Global product)
+- **Data controller of record (Privacy Act 1988):** Goldman Global Pty Ltd
+- **AWS root account:** `cto@goldmanglobal.com.au` (Goldman Global / Goldman Forge infrastructure)
+
+For stage 1 (NSW launch + the real Petersham case in flight) this is acceptable — Goldman Global ↔ ClaimDesk 247 is a shareholder/parent relationship, and the privacy notice now reflects it ("powered by Goldman Forge, a Goldman Global product"). For stage 2 (national rollout), consider whether a separate ClaimDesk 247 AWS account strengthens the data-controller posture — not blocking, just flagged.
+
+---
+
 ## 0. Prerequisites
 
 * An AWS account.
