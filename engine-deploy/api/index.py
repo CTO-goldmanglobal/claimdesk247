@@ -1,21 +1,29 @@
 # Vercel Python serverless entrypoint for the ClaimDesk 247 engine.
 # Vercel exposes a module-level ASGI `app` from /api/*.py as a function.
 #
-# The deploy ROOT must contain stage-2.5/, stage-3/, stage-4/ as siblings of
-# this api/ folder (wrap.py bootstraps stage-3 by relative path, and the Stage 4
-# Supabase adapter lives in stage-4/app/). Loading stage-2.5/app/wrap.py as the
-# package `app.wrap` keeps wrap.py's `from . import __version__` working.
+# Deploy layout: Vercel "Root Directory" = `engine-deploy/`. This folder
+# contains `api/`, `requirements.txt`, `vercel.json`. The monorepo's
+# `stage-2.5/`, `stage-3/`, `stage-4/` live one directory up (siblings of
+# `engine-deploy/`, NOT siblings of `api/`). So we resolve the monorepo
+# root by going up two levels from this file: api/ → engine-deploy/ → monorepo.
 #
-# VERIFY LOCALLY before trusting in prod (cannot be run from the planning seat):
+# Loading stage-2.5/app/wrap.py as the package `app.wrap` keeps wrap.py's
+# `from . import __version__` working.
+#
+# VERIFY LOCALLY before trusting in prod:
 #   pip install -r requirements.txt
 #   (cd stage-2.5 && python3 tests/run_acceptance.py)      # 18 + regression
 #   uvicorn api.index:app --reload                          # smoke /healthz
 import pathlib
 import sys
 
-_ROOT = pathlib.Path(__file__).resolve().parent.parent
+# __file__ = <monorepo>/engine-deploy/api/index.py
+# parent = api/, parent.parent = engine-deploy/, parent.parent.parent = monorepo root
+_MONOREPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 # stage-2.5 first so `app` resolves to the wrapper package (not stage-3's).
-sys.path.insert(0, str(_ROOT / "stage-2.5"))
+sys.path.insert(0, str(_MONOREPO_ROOT / "stage-2.5"))
+# Also add the monorepo root so stage-3/stage-4 absolute imports resolve.
+sys.path.insert(0, str(_MONOREPO_ROOT))
 
 from app.wrap import app  # noqa: E402  (FastAPI instance)
 
