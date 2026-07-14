@@ -1,5 +1,5 @@
 STAGE 2.5 ACCEPTANCE TEST REPORT (Engine-as-Endpoint)
-Generated: 2026-07-14T12:42:06.203129Z
+Generated: 2026-07-14T13:23:50.048296Z
 Suite: acceptance-tests.stage25.yaml
 Mode: local (TestClient)
 Stage 2 regression: /Volumes/Goldman Global/businesses/claimdesk247/stage-2/tests/run_acceptance.py
@@ -13,7 +13,7 @@ Stage 3 regression: /Volumes/Goldman Global/businesses/claimdesk247/stage-3/test
 [PASS] T-25-005   gate=G-43   esc-injury short-circuits with no band, terminal=True
 [PASS] T-25-006   gate=G-43   esc-multiparty short-circuits with no band
 [PASS] T-25-007   gate=G-44   full intake used opaque reference only; PII never in URL
-[PASS] T-25-008   gate=G-44   PDF served via opaque ref GF-D24D5759
+[PASS] T-25-008   gate=G-44   PDF served via opaque ref GF-5BE412C1
 [PASS] T-25-009   gate=G-45   customer -> 403 (server-side enforced)
 [PASS] T-25-010   gate=G-45   legal_staff -> 200, all 8 brief fields present
 [PASS] T-25-011   gate=G-46   deterministic ref in test mode: GF-6CF7B73B
@@ -26,7 +26,7 @@ Stage 3 regression: /Volumes/Goldman Global/businesses/claimdesk247/stage-3/test
 [PASS] T-25-018   gate=G-57   legal_staff w/ MFA -> 200, brief fields present
 [PASS] T-25-019   gate=G-T6   scenario-question endpoint: start -> user_position -> user_motion
 [PASS] T-25-020   gate=G-EV   upload rejected pre-consent (403: consent required)
-[PASS] T-25-021   gate=G-EV   upload ok: sha256=43739c566e26…, s3_key=GF-5F7796B5/ec11f83b-2566-47e3-ab25-13b3a1378e8a.png, audit written
+[PASS] T-25-021   gate=G-EV   upload ok: sha256=43739c566e26…, s3_key=GF-B10CD2F8/e71474f2-c8e6-492c-b8da-a66037ec2542.png, audit written
 [PASS] T-25-022   gate=G-EV   list ok (count=1); case view bound (evidence_count=1, pdf linked)
 [PASS] T-25-023   gate=G-EV   non-image -> 400; oversize -> 400 (size mentioned)
 [PASS] T-25-024   gate=G-PD-DISC  PD disclosure text returned with all 4 mandatory limbs; pd_disclosure_presented audit event fired

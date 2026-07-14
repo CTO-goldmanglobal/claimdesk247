@@ -1,6 +1,6 @@
 {
   "$comment": "ClaimDesk 247 — Property Damage (Third-Party Motor) sub-tree (NT) v1. PRE-LAUNCH UNSIGNED. Per MULTI-STATE-ROLLOUT-PLAN.md: every scenario ships without legal_signoff so G-PROD-LOCK escalates every NT PD intake as 'unsigned-scenario' until Legal Head signs before launch. Governing frame: common-law negligence + Arsalan v Rixon; Nguyen v Cassim [2021] HCA 274 CLR 606 (federal/HCA). Road rules: Australian Road Rules as applied in the NT (Traffic Act 1987 / Traffic Regulations). Limitation: Limitation Act 1981 (NT) — 3 years for tort (shorter than other jurisdictions — flag in quantum/limitation wording). NOT the Motor Accidents (Compensation) Act 1979 (NT) scheme (Lane 2). Confirm PD-only exemption from any NT touting/claim-farming regime in CD-R2 memo before sign-off. Injury firewall: any injury → esc-injury → law-firm partner. Band enum: likely|possible|unclear|insufficient.",
-  "version": "1.0.0-nt-prelaunch-unsigned",
+  "version": "1.0.0-nt-stage1-unsigned",
   "jurisdiction": "NT",
   "claim_type": "property_damage",
   "governing_law": "Common law negligence (liability) + Arsalan v Rixon; Nguyen v Cassim [2021] HCA 274 CLR 606 (like-for-like hire/recovery). NOT the Motor Accidents (Compensation) Act 1979 (NT) scheme (Lane 2). Limitation: Limitation Act 1981 (NT) — 3 years for tort (shorter than other jurisdictions — flag in quantum/limitation wording).",
@@ -155,13 +155,7 @@
           "text_web": "There isn't enough detail yet to assess your matter. Tell us a bit more and we'll review it. {{ATTACH:master}}"
         }
       ],
-      "escalation_overrides": [],
-      "legal_signoff": {
-        "approved": true,
-        "version": "e8634d23e7636c573fa16d83a3d2d0313f7dadfa0156c31041a33fae991cc7c2",
-        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
-        "date": "2026-07-13"
-      }
+      "escalation_overrides": []
     },
     {
       "id": "nt-pd2-failure-to-give-way",
@@ -275,13 +269,7 @@
           "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
         }
       ],
-      "escalation_overrides": [],
-      "legal_signoff": {
-        "approved": true,
-        "version": "e8634d23e7636c573fa16d83a3d2d0313f7dadfa0156c31041a33fae991cc7c2",
-        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
-        "date": "2026-07-13"
-      }
+      "escalation_overrides": []
     },
     {
       "id": "nt-pd3-reversing",
@@ -393,13 +381,7 @@
           "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
         }
       ],
-      "escalation_overrides": [],
-      "legal_signoff": {
-        "approved": true,
-        "version": "e8634d23e7636c573fa16d83a3d2d0313f7dadfa0156c31041a33fae991cc7c2",
-        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
-        "date": "2026-07-13"
-      }
+      "escalation_overrides": []
     },
     {
       "id": "nt-pd4-parked-vehicle-struck",
@@ -499,13 +481,7 @@
           "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
         }
       ],
-      "escalation_overrides": [],
-      "legal_signoff": {
-        "approved": true,
-        "version": "e8634d23e7636c573fa16d83a3d2d0313f7dadfa0156c31041a33fae991cc7c2",
-        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
-        "date": "2026-07-13"
-      }
+      "escalation_overrides": []
     },
     {
       "id": "nt-pd5-changing-lanes-sideswipe",
@@ -601,13 +577,7 @@
           "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
         }
       ],
-      "escalation_overrides": [],
-      "legal_signoff": {
-        "approved": true,
-        "version": "e8634d23e7636c573fa16d83a3d2d0313f7dadfa0156c31041a33fae991cc7c2",
-        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
-        "date": "2026-07-13"
-      }
+      "escalation_overrides": []
     },
     {
       "id": "nt-pd6-car-park",
@@ -711,13 +681,7 @@
           "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
         }
       ],
-      "escalation_overrides": [],
-      "legal_signoff": {
-        "approved": true,
-        "version": "e8634d23e7636c573fa16d83a3d2d0313f7dadfa0156c31041a33fae991cc7c2",
-        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
-        "date": "2026-07-13"
-      }
+      "escalation_overrides": []
     },
     {
       "id": "nt-pd7-other",
@@ -757,13 +721,7 @@
           "condition": "always",
           "action": "route_to_human"
         }
-      ],
-      "legal_signoff": {
-        "approved": true,
-        "version": "e8634d23e7636c573fa16d83a3d2d0313f7dadfa0156c31041a33fae991cc7c2",
-        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
-        "date": "2026-07-13"
-      }
+      ]
     }
   ]
 }

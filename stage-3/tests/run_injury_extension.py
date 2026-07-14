@@ -653,29 +653,24 @@ def _test_vic_pd_routing() -> tuple[bool, str]:
     return True, "VIC PD collision types route to vic-pdN scenario ids (state-prefixed)"
 
 
-def _test_vic_pd_signed_bands() -> tuple[bool, str]:
-    """Post Legal Head go-ahead (2026-07-13): VIC PD is live. Clear rear-end
-    bands as likely; catch-all other caps at unclear. Scenario ids stay
-    state-prefixed (vic-pdN) for routing."""
-    violations = []
+def _test_vic_pd_unsigned_stage1() -> tuple[bool, str]:
+    """Stage 1 = NSW-only live (P1-6 un-sign, 2026-07-14 review). VIC PD
+    tree is back to staging-unsigned: classify MUST escalate as
+    'unsigned-scenario' with no band. Routing still state-prefixed (vic-pdN).
+    Stage 2 (later) re-signs VIC after the verify item + citation audit close."""
     er = classify({
         "state": "VIC", "claim_type": "property_damage",
         "collision_type": "rear-end", "injuries": "none",
         "user_position": "front", "user_motion": "stopped", "chain_count": 2,
     })
     if er.scenario_id != "vic-pd1-rear-end":
-        violations.append(f"routing: got {er.scenario_id!r}")
-    if er.band != "likely":
-        violations.append(f"clear rear-end: expected likely, got band={er.band!r} esc={er.escalation!r}")
-    er_other = classify({
-        "state": "VIC", "claim_type": "property_damage",
-        "collision_type": "other", "injuries": "none",
-    })
-    if er_other.band != "unclear":
-        violations.append(f"vic-pd7-other: expected unclear, got band={er_other.band!r}")
-    if violations:
-        return False, "; ".join(violations)
-    return True, "VIC PD signed live: clear rear-end=likely, other=unclear"
+        return False, f"routing: got {er.scenario_id!r}, expected vic-pd1-rear-end"
+    if er.escalation != "unsigned-scenario":
+        return False, (f"stage 1 VIC must escalate as unsigned-scenario, "
+                       f"got esc={er.escalation!r} band={er.band!r}")
+    if er.band is not None:
+        return False, f"VIC emitted band={er.band!r} (forbidden — unsigned in stage 1)"
+    return True, "VIC PD stage 1: routes vic-pd1-rear-end → unsigned-scenario, no band"
 
 
 def _test_vic_pd_injury_firewall() -> tuple[bool, str]:
@@ -773,8 +768,9 @@ def _test_qld_wa_pd_routing() -> tuple[bool, str]:
     return True, "QLD/WA PD collision types route to state-prefixed scenario ids"
 
 
-def _test_qld_wa_pd_signed_bands() -> tuple[bool, str]:
-    """Post Legal Head go-ahead: QLD and WA PD emit bands (clear=likely)."""
+def _test_qld_wa_pd_unsigned_stage1() -> tuple[bool, str]:
+    """Stage 1 = NSW-only live (P1-6 un-sign). QLD and WA escalate as
+    unsigned-scenario; no band emitted."""
     violations = []
     for st, prefix in (("QLD", "qld"), ("WA", "wa")):
         er = classify({
@@ -784,11 +780,13 @@ def _test_qld_wa_pd_signed_bands() -> tuple[bool, str]:
         })
         if er.scenario_id != f"{prefix}-pd1-rear-end":
             violations.append(f"{st} routing: {er.scenario_id!r}")
-        if er.band != "likely":
-            violations.append(f"{st} clear: expected likely, got {er.band!r} esc={er.escalation!r}")
+        if er.escalation != "unsigned-scenario":
+            violations.append(f"{st}: expected unsigned-scenario, got esc={er.escalation!r}")
+        if er.band is not None:
+            violations.append(f"{st}: emitted band={er.band!r} (forbidden in stage 1)")
     if violations:
         return False, "; ".join(violations)
-    return True, "QLD + WA PD signed live: clear rear-end=likely"
+    return True, "QLD + WA PD stage 1: unsigned-scenario, no band"
 
 
 def _test_qld_wa_pd_hash_isolation() -> tuple[bool, str]:
@@ -822,9 +820,10 @@ def _test_qld_wa_pd_hash_isolation() -> tuple[bool, str]:
                   f"({[h[:8] for h in pd_hashes]})")
 
 
-def _test_remaining_states_pd_national() -> tuple[bool, str]:
-    """SA/TAS/ACT/NT PD trees route correctly, emit bands when signed, and
-    keep distinct hashes. NT limitation wording must reflect 3 years."""
+def _test_remaining_states_pd_unsigned_stage1() -> tuple[bool, str]:
+    """Stage 1 = NSW-only live. SA/TAS/ACT/NT route correctly, escalate as
+    unsigned-scenario with no band, and keep distinct hashes. NT limitation
+    wording must still reflect 3 years (carried for stage-2 sign-off prep)."""
     states = ("SA", "TAS", "ACT", "NT")
     route_checks = [
         ("SA", "rear-end", "sa-pd1-rear-end"),
@@ -847,12 +846,14 @@ def _test_remaining_states_pd_national() -> tuple[bool, str]:
             "collision_type": "rear-end", "injuries": "none",
             "user_position": "front", "user_motion": "stopped", "chain_count": 2,
         })
-        if er.band != "likely":
-            violations.append(f"{st}: expected likely, got band={er.band!r} esc={er.escalation!r}")
+        if er.escalation != "unsigned-scenario":
+            violations.append(f"{st}: expected unsigned-scenario, got esc={er.escalation!r}")
+        if er.band is not None:
+            violations.append(f"{st}: emitted band={er.band!r} (forbidden in stage 1)")
     if violations:
         return False, "; ".join(violations)
 
-    # NT limitation wording must reflect 3 years (not 6).
+    # NT limitation wording must reflect 3 years (not 6) — for stage-2 prep.
     nt_tree = _load_rule_tree_for("property_damage", "NT")
     gov = nt_tree.get("governing_law", "")
     if "3 years" not in gov and "3-year" not in gov:
@@ -864,7 +865,7 @@ def _test_remaining_states_pd_national() -> tuple[bool, str]:
               for st in pd_states]
     if len(set(hashes)) != 8:
         return False, f"PD jurisdiction hashes not all distinct: {[h[:8] for h in hashes]}"
-    return True, ("SA/TAS/ACT/NT route + signed bands; NT 3yr flagged; "
+    return True, ("SA/TAS/ACT/NT route + stage-1 unsigned-escalate; NT 3yr flagged; "
                   f"8 PD hashes distinct ({[h[:8] for h in hashes]})")
 
 
@@ -895,14 +896,14 @@ CASES: list[tuple[str, Callable[[], tuple[bool, str]]]] = [
     ("IX-17", _test_pd_backward_compat_motor_unchanged),
     # Multi-state national PD — Legal Head go-ahead 2026-07-13 (all live).
     ("IX-18", _test_vic_pd_routing),
-    ("IX-19", _test_vic_pd_signed_bands),
+    ("IX-19", _test_vic_pd_unsigned_stage1),  # P1-6 stage 1 NSW-only
     ("IX-20", _test_vic_pd_injury_firewall),
     ("IX-21", _test_vic_pd_hash_isolation),
     ("IX-22", _test_unregistered_state_escalates),
     ("IX-23", _test_qld_wa_pd_routing),
-    ("IX-24", _test_qld_wa_pd_signed_bands),
+    ("IX-24", _test_qld_wa_pd_unsigned_stage1),  # P1-6 stage 1
     ("IX-25", _test_qld_wa_pd_hash_isolation),
-    ("IX-26", _test_remaining_states_pd_national),
+    ("IX-26", _test_remaining_states_pd_unsigned_stage1),  # P1-6 stage 1
 ]
 
 

@@ -155,13 +155,7 @@
           "text_web": "There isn't enough detail yet to assess your matter. Tell us a bit more and we'll review it. {{ATTACH:master}}"
         }
       ],
-      "escalation_overrides": [],
-      "legal_signoff": {
-        "approved": true,
-        "version": "fc61fc3edfe5828e75ff5686e9682dc73afc5997d9750231c9a2a135694d5dca",
-        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
-        "date": "2026-07-13"
-      }
+      "escalation_overrides": []
     },
     {
       "id": "wa-pd2-failure-to-give-way",
@@ -275,13 +269,7 @@
           "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
         }
       ],
-      "escalation_overrides": [],
-      "legal_signoff": {
-        "approved": true,
-        "version": "fc61fc3edfe5828e75ff5686e9682dc73afc5997d9750231c9a2a135694d5dca",
-        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
-        "date": "2026-07-13"
-      }
+      "escalation_overrides": []
     },
     {
       "id": "wa-pd3-reversing",
@@ -393,13 +381,7 @@
           "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
         }
       ],
-      "escalation_overrides": [],
-      "legal_signoff": {
-        "approved": true,
-        "version": "fc61fc3edfe5828e75ff5686e9682dc73afc5997d9750231c9a2a135694d5dca",
-        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
-        "date": "2026-07-13"
-      }
+      "escalation_overrides": []
     },
     {
       "id": "wa-pd4-parked-vehicle-struck",
@@ -499,13 +481,7 @@
           "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
         }
       ],
-      "escalation_overrides": [],
-      "legal_signoff": {
-        "approved": true,
-        "version": "fc61fc3edfe5828e75ff5686e9682dc73afc5997d9750231c9a2a135694d5dca",
-        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
-        "date": "2026-07-13"
-      }
+      "escalation_overrides": []
     },
     {
       "id": "wa-pd5-changing-lanes-sideswipe",
@@ -601,13 +577,7 @@
           "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
         }
       ],
-      "escalation_overrides": [],
-      "legal_signoff": {
-        "approved": true,
-        "version": "fc61fc3edfe5828e75ff5686e9682dc73afc5997d9750231c9a2a135694d5dca",
-        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
-        "date": "2026-07-13"
-      }
+      "escalation_overrides": []
     },
     {
       "id": "wa-pd6-car-park",
@@ -711,13 +681,7 @@
           "text_web": "There isn't enough detail yet. Tell us more and we'll review. {{ATTACH:master}}"
         }
       ],
-      "escalation_overrides": [],
-      "legal_signoff": {
-        "approved": true,
-        "version": "fc61fc3edfe5828e75ff5686e9682dc73afc5997d9750231c9a2a135694d5dca",
-        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
-        "date": "2026-07-13"
-      }
+      "escalation_overrides": []
     },
     {
       "id": "wa-pd7-other",
@@ -757,13 +721,7 @@
           "condition": "always",
           "action": "route_to_human"
         }
-      ],
-      "legal_signoff": {
-        "approved": true,
-        "version": "fc61fc3edfe5828e75ff5686e9682dc73afc5997d9750231c9a2a135694d5dca",
-        "by": "Legal Head — Goldman Global, go-ahead for multi-state PD pre-launch sign-off (2026-07-13)",
-        "date": "2026-07-13"
-      }
+      ]
     }
   ]
 }
