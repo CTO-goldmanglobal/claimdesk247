@@ -834,6 +834,40 @@ def _drive_pd_disclosure_acknowledged_on_consent(client: HTTPClient, case: dict)
     return True, "consent grant → pd_disclosure_acknowledged fired"
 
 
+def _drive_pd_disclosure_persisting_audit_no_crash(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """P0-1 regression: consent grant must NOT 500 when AUDIT is _PersistingAudit
+    (production configuration). Pre-fix, _PersistingAudit lacked all() and the
+    presence check crashed every consent grant in production. This test
+    simulates the production wrapper by monkey-patching AUDIT and proving the
+    consent path returns 200, not 500."""
+    import app.wrap as wrap_mod
+    original_audit = wrap_mod.AUDIT
+
+    class _StubStore:
+        """Minimal store exposing append_audit (triggers _PersistingAudit)."""
+        def append_audit(self, **kwargs):
+            pass
+
+    base = original_audit._base if hasattr(original_audit, "_base") else original_audit
+    stub = wrap_mod._PersistingAudit(base, _StubStore())
+    wrap_mod.AUDIT = stub
+    try:
+        ref = _create_session(client)
+        code, _, _ = client.request("GET", "/api/disclosure/property_damage",
+                                     params={"ref": ref})
+        if code != 200:
+            return False, f"disclosure GET failed under _PersistingAudit: {code}"
+        # The load-bearing assertion: consent must not 500.
+        code2, body2, _ = client.request("POST", "/api/consent",
+                                          json={"reference": ref, "accept": True})
+        if code2 != 200:
+            return False, (f"consent POST returned {code2} under _PersistingAudit "
+                           f"(P0-1 regression): {body2}")
+        return True, "consent succeeds under _PersistingAudit (P0-1 fixed)"
+    finally:
+        wrap_mod.AUDIT = original_audit
+
+
 DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-001": lambda c, x: _drive_classify_parity(c, x, REAR_END_INTAKE),
     "T-25-002": lambda c, x: _drive_classify_parity(c, x, GIVEWAY_INTAKE),
@@ -865,6 +899,7 @@ DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-026": _drive_pd_disclosure_acknowledged_on_consent,
     "T-25-027": _drive_pd_disclosure_requires_ref,
     "T-25-028": _drive_pd_disclosure_hash_carried_to_ack,
+    "T-25-029": _drive_pd_disclosure_persisting_audit_no_crash,  # P0-1 regression
 }
 
 

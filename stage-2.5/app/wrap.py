@@ -197,7 +197,14 @@ class _PersistingAudit:
     """Mirror in-memory audit (language-level immutability) into the store's
     append-only audit_log table when the active store supports it (G-34/G-54).
     Maps wrap.py's `user=` to the adapter's `actor=`. Store failures are
-    swallowed so an audit-write hiccup never breaks the intake path."""
+    swallowed so an audit-write hiccup never breaks the intake path.
+
+    P0-1 fix (2026-07-14 review): delegates `all()` / `filter()` / `export()`
+    to the in-memory base so callers that read the log (e.g. the PD disclosure
+    presence check) don't AttributeError against this wrapper in production.
+    Note: in serverless, the in-memory copy is per-instance and empty across
+    cold starts — callers that need a durable read must query the store's
+    audit_log table directly (see `_durable_pd_disclosure_presented`)."""
 
     def __init__(self, base: Any, store: Any) -> None:
         self._base = base
@@ -217,6 +224,49 @@ class _PersistingAudit:
         except Exception:
             pass
         return rv
+
+    # ----- Read-side delegation (so wrapper behaves like the underlying log) -----
+    def all(self) -> list[Any]:
+        return self._base.all()
+
+    def filter(self, **kwargs: Any) -> list[Any]:
+        return self._base.filter(**kwargs)
+
+    def export(self) -> list[dict[str, Any]]:
+        return self._base.export()
+
+    def __len__(self) -> int:
+        return len(self._base)
+
+
+def _durable_pd_disclosure_presented(reference: str) -> Optional[dict[str, Any]]:
+    """Durable check: did this session already have a pd_disclosure_presented
+    event? Queries the persistent audit_log table (not process memory), so the
+    check works across serverless cold starts. Returns the audit row's inputs
+    (carrying disclosure_hash + version) if found, else None.
+
+    P0-1 fix: the previous in-memory-only check would 500 against this wrapper
+    in production, and would silently miss events written by another lambda."""
+    durably_query = getattr(SESSIONS, "find_audit_events", None)
+    if durably_query is None:
+        # In-memory store (tests / local dev): fall back to process log.
+        for e in AUDIT.all():
+            if e.action != "pd_disclosure_presented":
+                continue
+            if e.inputs.get("reference") == reference:
+                return e.inputs
+        return None
+    try:
+        rows = durably_query(action="pd_disclosure_presented",
+                             reference=reference, limit=1)
+        if rows:
+            return rows[0].get("inputs")
+    except Exception:
+        # Store read failure → fall back to process log (best-effort).
+        for e in AUDIT.all():
+            if e.action == "pd_disclosure_presented" and e.inputs.get("reference") == reference:
+                return e.inputs
+    return None
 
 
 AUDIT = (
@@ -730,21 +780,18 @@ def create_app() -> FastAPI:
             # pd_disclosure_acknowledged sibling event for any session whose
             # pd_disclosure_presented event already fired. Carry the disclosure
             # hash forward so the acknowledgement is bound to the exact text
-            # version the user saw (P1-3 fix).
-            presented_entry = next((
-                e for e in AUDIT.all()
-                if e.action == "pd_disclosure_presented"
-                and (e.session_id == s.session_id
-                     or e.inputs.get("reference") == ref)
-            ), None)
-            if presented_entry is not None:
+            # version the user saw (P1-3 fix). Uses the durable check (P0-1 fix)
+            # so this works across serverless cold starts and doesn't 500
+            # against _PersistingAudit.
+            presented_inputs = _durable_pd_disclosure_presented(ref)
+            if presented_inputs is not None:
                 AUDIT.append(
                     session_id=s.session_id, user=_client_ip(request),
                     action="pd_disclosure_acknowledged",
                     inputs={
                         "reference": ref, "claim_type": "property_damage",
-                        "disclosure_hash": presented_entry.inputs.get("disclosure_hash"),
-                        "disclosure_version": presented_entry.inputs.get("disclosure_version"),
+                        "disclosure_hash": presented_inputs.get("disclosure_hash"),
+                        "disclosure_version": presented_inputs.get("disclosure_version"),
                     },
                     rule_path=[], output={"state": s.state},
                 )
@@ -810,22 +857,18 @@ def create_app() -> FastAPI:
         SESSIONS.put(s)  # F-E: persist consent so the next request sees it (real store)
         # PD-COUNSEL-MEMO §3.3: the consent-grant doubles as the
         # pd_disclosure_acknowledged sibling event if the presented-event fired.
-        # Carry the disclosure hash forward (P1-3 fix).
-        presented_entry = next((
-            e for e in AUDIT.all()
-            if e.action == "pd_disclosure_presented"
-            and (e.session_id == s.session_id
-                 or e.inputs.get("reference") == req.reference)
-        ), None)
-        if presented_entry is not None:
+        # Carry the disclosure hash forward (P1-3 fix). Uses the durable check
+        # (P0-1 fix) — works across serverless cold starts.
+        presented_inputs = _durable_pd_disclosure_presented(req.reference)
+        if presented_inputs is not None:
             ip = _client_ip(request)
             AUDIT.append(
                 session_id=s.session_id, user=ip,
                 action="pd_disclosure_acknowledged",
                 inputs={
                     "reference": req.reference, "claim_type": "property_damage",
-                    "disclosure_hash": presented_entry.inputs.get("disclosure_hash"),
-                    "disclosure_version": presented_entry.inputs.get("disclosure_version"),
+                    "disclosure_hash": presented_inputs.get("disclosure_hash"),
+                    "disclosure_version": presented_inputs.get("disclosure_version"),
                 },
                 rule_path=[], output={"state": s.state},
             )
@@ -1444,7 +1487,27 @@ _jwks_client = None  # lazily constructed PyJWKClient (caches keys)
 
 
 def _brief_auth_mode() -> str:
-    return os.environ.get("BRIEF_AUTH_MODE", "stub").lower()
+    """Auth mode for /api/brief.
+
+    P0-3 fix (2026-07-14 review): in production, BRIEF_AUTH_MODE must be 'jwt'
+    — the stub path (as_email + X-MFA-Verified) is spoofable and ships PII via
+    query string. Hard-fail at request time if APP_ENV=production and the
+    operator hasn't explicitly set BRIEF_AUTH_MODE=jwt.
+
+    Allow stub override via BRIEF_ALLOW_STUB_IN_PRODUCTION=1 only for known
+    emergency-rollback scenarios (sets a loud header on responses)."""
+    mode = os.environ.get("BRIEF_AUTH_MODE", "stub").lower()
+    app_env = _app_env()
+    allow_stub = os.environ.get("BRIEF_ALLOW_STUB_IN_PRODUCTION") == "1"
+    if app_env == "production" and mode != "jwt" and not allow_stub:
+        # Fail loud — never silently serve briefs under spoofable auth in prod.
+        raise HTTPException(
+            status_code=500,
+            detail=("BRIEF_AUTH_MODE must be 'jwt' in production (currently "
+                    f"'{mode}'). Set BRIEF_AUTH_MODE=jwt or, for emergency "
+                    "rollback only, BRIEF_ALLOW_STUB_IN_PRODUCTION=1.")
+        )
+    return mode
 
 
 def _verify_supabase_jwt(token: str) -> Optional[dict]:

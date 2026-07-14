@@ -253,6 +253,16 @@ cases:
     - "POST /api/consent (accept)"
   expect: { hash_carried: true }
 
+- id: T-25-029
+  gate: G-PD-DISC
+  desc: "P0-1 regression: consent succeeds under _PersistingAudit (production wrapper)"
+  flow:
+    - "monkey-patch AUDIT = _PersistingAudit (production config)"
+    - "POST /api/session"
+    - "GET /api/disclosure/property_damage?ref=<ref>"
+    - "POST /api/consent (accept) — must not 500"
+  expect: { http: 200, no_attribute_error: true }
+
 coverage_assertion:
   gates_exercised: [G-41, G-42, G-43, G-44, G-45, G-46, G-47, G-48, G-49, G-57, G-T6, G-EV, G-PD-DISC]
   parity_proven: true

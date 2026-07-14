@@ -163,6 +163,28 @@ def main() -> int:
     total_purged = 0
     failures: list[str] = []
     for ref in references:
+        if args.dry_run:
+            # P0-2 fix: dry-run must NOT delete. Count what would be purged
+            # by listing + horizon filter, without calling delete_for_retention.
+            try:
+                items = store.list(reference=ref)
+            except Exception as exc:  # noqa: BLE001
+                failures.append(f"{ref}: {exc}")
+                continue
+            count = 0
+            for it in items:
+                try:
+                    ts = datetime.fromisoformat(it.uploaded_at)
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=timezone.utc)
+                except Exception:
+                    continue
+                if ts <= horizon:
+                    count += 1
+            if count:
+                print(f"  {ref}: would purge {count} object(s)")
+            total_purged += count
+            continue
         try:
             deleted_ids = store.delete_for_retention(reference=ref, older_than=horizon)
         except Exception as exc:  # noqa: BLE001
@@ -170,11 +192,11 @@ def main() -> int:
             continue
         if deleted_ids:
             print(f"  {ref}: purged {len(deleted_ids)} object(s)")
-            if not args.dry_run:
-                _soft_delete_metadata(ref, deleted_ids)
+            _soft_delete_metadata(ref, deleted_ids)
             total_purged += len(deleted_ids)
     print()
-    print(f"Total purged: {total_purged} object(s) across {len(references)} case(s).")
+    print(f"Total {'that would be ' if args.dry_run else ''}purged: "
+          f"{total_purged} object(s) across {len(references)} case(s).")
     if failures:
         print(f"Failures ({len(failures)}):", file=sys.stderr)
         for f in failures:
