@@ -23,9 +23,13 @@
 begin;
 
 -- ---------------------------------------------------------------------------
--- case_evidence — one row per uploaded evidence file. PII NEVER lives here:
--- only the opaque intake reference, the S3 key (also reference-keyed), and a
--- SHA-256 of the file bytes for tamper-evidence.
+-- case_evidence — one row per uploaded evidence file. NOTE: this table holds
+-- NO direct customer PII (no names, no contact details); it stores the opaque
+-- intake reference, the S3 key (also reference-keyed), and a SHA-256 of the
+-- file bytes for tamper-evidence. The uploaded_by column does carry the
+-- uploader's IP (customer) or email (staff) for the audit chain — that is
+-- operator metadata, not customer-supplied PII, and is treated as personal
+-- data under the Privacy Act 1988 (retention matches the audit_log policy).
 -- ---------------------------------------------------------------------------
 create table if not exists public.case_evidence (
     evidence_id          uuid primary key default gen_random_uuid(),

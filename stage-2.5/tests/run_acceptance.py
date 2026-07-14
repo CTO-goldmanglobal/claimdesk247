@@ -781,6 +781,44 @@ def _drive_pd_disclosure_non_pd_returns_null(client: HTTPClient, case: dict) -> 
     return True, "motor disclosure_text=null (PD-only disclosure)"
 
 
+def _drive_pd_disclosure_requires_ref(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-PD-DISC (P1-3 fix): PD disclosure without ref → 400. Anonymous
+    presented-events would defeat the evidentiary purpose — the disclosure
+    MUST bind to a session so the audit pair is enforceable."""
+    code, body, _ = client.request("GET", "/api/disclosure/property_damage")
+    if code != 400:
+        return False, f"expected 400 without ref, got {code}: {body}"
+    detail = str((body or {}).get("detail", ""))
+    if "ref" not in detail.lower():
+        return False, f"400 but detail doesn't mention ref: {body}"
+    return True, "PD disclosure without ref → 400 (evidentiary binding enforced)"
+
+
+def _drive_pd_disclosure_hash_carried_to_ack(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-PD-DISC (P1-3 fix): disclosure_hash from the presented event is
+    carried forward into the acknowledged event — so a later text change
+    is detectable from the audit trail alone."""
+    from app.wrap import AUDIT
+    ref = _create_session(client)
+    code, body, _ = client.request("GET", "/api/disclosure/property_damage",
+                                    params={"ref": ref})
+    if code != 200:
+        return False, f"presented status {code}: {body}"
+    presented_hash = (body or {}).get("disclosure_hash")
+    if not presented_hash or not presented_hash.startswith("sha256:"):
+        return False, f"presented event missing disclosure_hash: {body}"
+    _accept_consent(client, ref)
+    acks = [e for e in AUDIT.all()
+            if e.action == "pd_disclosure_acknowledged"
+            and (e.session_id == ref or e.inputs.get("reference") == ref)]
+    if not acks:
+        return False, "pd_disclosure_acknowledged not fired"
+    ack_hash = acks[0].inputs.get("disclosure_hash")
+    if ack_hash != presented_hash:
+        return False, f"hash mismatch: presented={presented_hash} ack={ack_hash}"
+    return True, f"disclosure_hash carried {presented_hash} → acknowledged"
+
+
 def _drive_pd_disclosure_acknowledged_on_consent(client: HTTPClient, case: dict) -> tuple[bool, str]:
     """G-PD-DISC: granting consent fires pd_disclosure_acknowledged sibling event."""
     from app.wrap import AUDIT
@@ -825,6 +863,8 @@ DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-024": _drive_pd_disclosure_presented,
     "T-25-025": _drive_pd_disclosure_non_pd_returns_null,
     "T-25-026": _drive_pd_disclosure_acknowledged_on_consent,
+    "T-25-027": _drive_pd_disclosure_requires_ref,
+    "T-25-028": _drive_pd_disclosure_hash_carried_to_ack,
 }
 
 

@@ -120,8 +120,10 @@ def _list_case_references() -> list[str]:
 
 
 def _soft_delete_metadata(reference: str, file_ids: list[str]) -> None:
-    """Mark the case_evidence rows as retention-purged. Best-effort: the S3
-    delete is the real purge; this only tidies the index row."""
+    """Mark the case_evidence rows as retention-purged (soft-delete via
+    deleted_at — matches the migration column). Best-effort: the S3 delete
+    is the real purge; this only tidies the index row so signed URLs stop
+    resolving for purged files."""
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not (url and key) or not file_ids:
@@ -131,7 +133,7 @@ def _soft_delete_metadata(reference: str, file_ids: list[str]) -> None:
         sb = create_client(url, key)
         now = datetime.now(timezone.utc).isoformat()
         sb.table("case_evidence").update(
-            {"retention_purged_at": now}
+            {"deleted_at": now}
         ).in_("evidence_id", file_ids).execute()
     except Exception as exc:  # noqa: BLE001
         print(f"WARNING: metadata soft-delete failed for {reference}: {exc}",
@@ -162,15 +164,15 @@ def main() -> int:
     failures: list[str] = []
     for ref in references:
         try:
-            n = store.delete_for_retention(reference=ref, older_than=horizon)
+            deleted_ids = store.delete_for_retention(reference=ref, older_than=horizon)
         except Exception as exc:  # noqa: BLE001
             failures.append(f"{ref}: {exc}")
             continue
-        if n:
-            print(f"  {ref}: purged {n} object(s)")
+        if deleted_ids:
+            print(f"  {ref}: purged {len(deleted_ids)} object(s)")
             if not args.dry_run:
-                _soft_delete_metadata(ref, [])  # ids not returned by delete_for_retention
-            total_purged += n
+                _soft_delete_metadata(ref, deleted_ids)
+            total_purged += len(deleted_ids)
     print()
     print(f"Total purged: {total_purged} object(s) across {len(references)} case(s).")
     if failures:

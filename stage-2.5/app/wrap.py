@@ -658,12 +658,39 @@ def create_app() -> FastAPI:
                 if isinstance(s.get("legal_signoff"), dict)
                 and s["legal_signoff"].get("approved") is True
             )
+            current_hash = stage3_engine._compute_scenarios_hash(ct_tree)  # type: ignore[attr-defined]
+            # P2 fix (2026-07-14 review): live means every scenario is BOTH
+            # approved AND its sign-off version equals the current content
+            # hash. The previous definition (signed == total) overstated
+            # "live" for stale-but-approved trees. Runtime escalates stale
+            # as stale-signoff, so healthz must reflect the same.
+            signed_current = sum(
+                1 for s in scenarios
+                if isinstance(s.get("legal_signoff"), dict)
+                and s["legal_signoff"].get("approved") is True
+                and s["legal_signoff"].get("version") == current_hash
+            )
+            signed_approved = sum(
+                1 for s in scenarios
+                if isinstance(s.get("legal_signoff"), dict)
+                and s["legal_signoff"].get("approved") is True
+            )
+            stale = sum(
+                1 for s in scenarios
+                if isinstance(s.get("legal_signoff"), dict)
+                and s["legal_signoff"].get("approved") is True
+                and s["legal_signoff"].get("version") != current_hash
+            )
+            unsigned = len(scenarios) - signed_approved
             rule_tree_versions[label] = {
                 "version": ct_tree.get("version", "unknown"),
-                "hash": stage3_engine._compute_scenarios_hash(ct_tree),  # type: ignore[attr-defined]
+                "hash": current_hash,
                 "scenarios": len(scenarios),
-                "signed": signed,
-                "live": signed == len(scenarios),  # all scenarios signed -> live
+                "signed_current": signed_current,
+                "signed_approved": signed_approved,
+                "stale": stale,
+                "unsigned": unsigned,
+                "live": signed_current == len(scenarios),
             }
         return {
             "status": "ok",
@@ -701,17 +728,24 @@ def create_app() -> FastAPI:
             )
             # PD-COUNSEL-MEMO §3.3: the consent-grant doubles as the
             # pd_disclosure_acknowledged sibling event for any session whose
-            # pd_disclosure_presented event already fired.
-            presented = any(
-                e.action == "pd_disclosure_presented"
-                and (e.session_id == s.session_id or e.inputs.get("reference") == ref)
-                for e in AUDIT.all()
-            )
-            if presented:
+            # pd_disclosure_presented event already fired. Carry the disclosure
+            # hash forward so the acknowledgement is bound to the exact text
+            # version the user saw (P1-3 fix).
+            presented_entry = next((
+                e for e in AUDIT.all()
+                if e.action == "pd_disclosure_presented"
+                and (e.session_id == s.session_id
+                     or e.inputs.get("reference") == ref)
+            ), None)
+            if presented_entry is not None:
                 AUDIT.append(
                     session_id=s.session_id, user=_client_ip(request),
                     action="pd_disclosure_acknowledged",
-                    inputs={"reference": ref, "claim_type": "property_damage"},
+                    inputs={
+                        "reference": ref, "claim_type": "property_damage",
+                        "disclosure_hash": presented_entry.inputs.get("disclosure_hash"),
+                        "disclosure_version": presented_entry.inputs.get("disclosure_version"),
+                    },
                     rule_path=[], output={"state": s.state},
                 )
             return {"ref": s.reference, "reference": s.reference,
@@ -776,17 +810,23 @@ def create_app() -> FastAPI:
         SESSIONS.put(s)  # F-E: persist consent so the next request sees it (real store)
         # PD-COUNSEL-MEMO §3.3: the consent-grant doubles as the
         # pd_disclosure_acknowledged sibling event if the presented-event fired.
-        presented = any(
-            e.action == "pd_disclosure_presented"
-            and (e.session_id == s.session_id or e.inputs.get("reference") == req.reference)
-            for e in AUDIT.all()
-        )
-        if presented:
+        # Carry the disclosure hash forward (P1-3 fix).
+        presented_entry = next((
+            e for e in AUDIT.all()
+            if e.action == "pd_disclosure_presented"
+            and (e.session_id == s.session_id
+                 or e.inputs.get("reference") == req.reference)
+        ), None)
+        if presented_entry is not None:
             ip = _client_ip(request)
             AUDIT.append(
                 session_id=s.session_id, user=ip,
                 action="pd_disclosure_acknowledged",
-                inputs={"reference": req.reference, "claim_type": "property_damage"},
+                inputs={
+                    "reference": req.reference, "claim_type": "property_damage",
+                    "disclosure_hash": presented_entry.inputs.get("disclosure_hash"),
+                    "disclosure_version": presented_entry.inputs.get("disclosure_version"),
+                },
                 rule_path=[], output={"state": s.state},
             )
         slot_def = stage3_state_machine.SLOT_DEFINITIONS[0]
@@ -799,6 +839,11 @@ def create_app() -> FastAPI:
     # doubles as the pd_disclosure_acknowledged sibling event for PD intakes.
     # Together these two events satisfy the memo's evidentiary requirement
     # that the consumer was told before any PII was collected.
+    #
+    # P1-3 fix (2026-07-14 review): the disclosure text hash is recorded in
+    # the audit event so a later text change is detectable, and `ref` is
+    # REQUIRED — no anonymous presented-events. This makes the audit pair
+    # strong enough to defeat an ACL "I wasn't told" complaint.
     @app.get("/api/disclosure/{claim_type}")
     def get_disclosure(claim_type: str, request: Request) -> Any:
         ref = request.query_params.get("ref")
@@ -806,27 +851,43 @@ def create_app() -> FastAPI:
         if ct != "property_damage":
             # Motor/PL/med-neg don't carry the PD recovery disclosure today;
             # the privacy notice in /api/session is their consent-gate text.
-            return {"claim_type": ct, "disclosure_text": None}
+            return {"claim_type": ct, "disclosure_text": None, "disclosure_hash": None}
+        if not ref:
+            # The disclosure MUST bind to a session so the presented-event is
+            # evidentiary. An anonymous render would prove nothing.
+            raise HTTPException(
+                status_code=400,
+                detail="ref query parameter is required for the PD disclosure"
+            )
         try:
             raw = stage3_config.get_disclaimer("pd_recovery_disclosure")
             text = stage3_config.resolve_tokens(raw)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=500, detail=f"disclosure render failed: {exc}")
-        # Fire the presented-event for this session if we have a ref. Best-effort
-        # — the audit is the evidentiary record, but the disclosure can still be
-        # rendered without one (e.g. a pre-session preview in the widget).
-        if ref:
-            s = SESSIONS.by_reference(ref)
-            if s is not None:
-                ip = _client_ip(request)
-                AUDIT.append(
-                    session_id=s.session_id, user=ip,
-                    action="pd_disclosure_presented",
-                    inputs={"claim_type": "property_damage", "reference": ref},
-                    rule_path=[], output={"state": s.state},
-                )
-                SESSIONS.put(s)
-        return {"claim_type": "property_damage", "disclosure_text": text}
+        import hashlib as _hashlib
+        disclosure_hash = "sha256:" + _hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+        # Fire the presented-event for this session. The session must exist.
+        s = SESSIONS.by_reference(ref)
+        if s is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        ip = _client_ip(request)
+        AUDIT.append(
+            session_id=s.session_id, user=ip,
+            action="pd_disclosure_presented",
+            inputs={
+                "claim_type": "property_damage", "reference": ref,
+                "disclosure_hash": disclosure_hash,
+                "disclosure_version": "2026-07-14-v1",
+            },
+            rule_path=[], output={"state": s.state},
+        )
+        SESSIONS.put(s)
+        return {
+            "claim_type": "property_damage",
+            "disclosure_text": text,
+            "disclosure_hash": disclosure_hash,
+            "disclosure_version": "2026-07-14-v1",
+        }
 
     # ---- /api/slot (S3 + validation) ----
     # Two dialects on one path:

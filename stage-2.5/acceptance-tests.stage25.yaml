@@ -237,6 +237,22 @@ cases:
     - "POST /api/consent (accept)"
   expect: { audit_action: pd_disclosure_acknowledged }
 
+- id: T-25-027
+  gate: G-PD-DISC
+  desc: "PD disclosure without ref → 400 (evidentiary binding)"
+  flow:
+    - "GET /api/disclosure/property_damage (no ref)"
+  expect: { http: 400, detail_contains: "ref" }
+
+- id: T-25-028
+  gate: G-PD-DISC
+  desc: "disclosure_hash from presented event carried into acknowledged event"
+  flow:
+    - "POST /api/session"
+    - "GET /api/disclosure/property_damage?ref=<ref>"
+    - "POST /api/consent (accept)"
+  expect: { hash_carried: true }
+
 coverage_assertion:
   gates_exercised: [G-41, G-42, G-43, G-44, G-45, G-46, G-47, G-48, G-49, G-57, G-T6, G-EV, G-PD-DISC]
   parity_proven: true

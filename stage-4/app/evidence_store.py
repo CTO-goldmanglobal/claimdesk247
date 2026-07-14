@@ -131,7 +131,7 @@ class EvidenceStore(Protocol):
     def signed_url(self, *, reference: str, file_id: str) -> Optional[str]: ...
 
     def delete_for_retention(self, *, reference: str,
-                             older_than: datetime) -> int: ...
+                             older_than: datetime) -> list[str]: ...
 
 
 # ----- Validation helpers (shared by every adapter) -----
@@ -287,18 +287,20 @@ class S3EvidenceStore:
         return None
 
     def delete_for_retention(self, *, reference: str,
-                             older_than: datetime) -> int:
-        """Retention purge: delete the S3 object. Soft-deletes the metadata
+                             older_than: datetime) -> list[str]:
+        """Retention purge: delete the S3 objects. Soft-deletes the metadata
         row via the HTTP caller (which owns the DB adapter). The audit log
         entry is append-only and is NEVER removed.
 
-        NOTE: the scheduled job that calls this is not yet wired. See the
-        runbook → Retention. Glacier-archived objects need a restore before
-        delete; this implementation issues the delete and lets S3 handle it
-        (Glacier Deep Archive supports direct DELETE without restore).
+        Returns the list of file_ids that were deleted so the caller can
+        soft-delete the matching DB rows. Glacier-archived objects need a
+        restore before delete; this implementation issues the delete and lets
+        S3 handle it (Glacier Deep Archive supports direct DELETE without restore).
         """
         items = self.list(reference=reference)
         to_delete: list[dict[str, str]] = []
+        deleted_file_ids: list[str] = []
+        id_by_key: dict[str, str] = {}
         for it in items:
             try:
                 ts = datetime.fromisoformat(it.uploaded_at)
@@ -309,13 +311,21 @@ class S3EvidenceStore:
             if ts > older_than:
                 continue
             to_delete.append({"Key": it.s3_key})
+            id_by_key[it.s3_key] = it.file_id
         if not to_delete:
-            return 0
+            return []
         self._s3.delete_objects(
             Bucket=self._bucket,
             Delete={"Objects": to_delete, "Quiet": True},
         )
-        return len(to_delete)
+        # Only count as deleted the keys we submitted; Quiet response omits
+        # successful ones, so we trust the request unless the API ever returns
+        # per-key Errors (would surface via exception).
+        for d in to_delete:
+            fid = id_by_key.get(d["Key"])
+            if fid:
+                deleted_file_ids.append(fid)
+        return deleted_file_ids
 
     # ----- internal -----
 
@@ -380,8 +390,8 @@ class InMemoryEvidenceStore:
         return f"memory://signed/{rec.s3_key}?ttl={SIGNED_URL_TTL_SECONDS}"
 
     def delete_for_retention(self, *, reference: str,
-                             older_than: datetime) -> int:
-        removed = 0
+                             older_than: datetime) -> list[str]:
+        removed_ids: list[str] = []
         for fid, rec in list(self._rows.items()):
             if rec.reference != reference:
                 continue
@@ -395,8 +405,8 @@ class InMemoryEvidenceStore:
                 continue
             self._objects.pop(rec.s3_key, None)
             self._rows.pop(fid, None)
-            removed += 1
-        return removed
+            removed_ids.append(fid)
+        return removed_ids
 
 
 # =====================================================================
@@ -412,12 +422,17 @@ def build_evidence_store() -> EvidenceStore:
     Local dev / CI / tests: ``InMemoryEvidenceStore`` (lost on process exit;
         fine for tests, never for deploy).
 
-    The factory never raises — if S3 init fails (boto3 missing, bad creds) it
-    falls back to InMemory so the API still boots. The first upload then
-    surfaces a clear 503 from the HTTP layer.
+    Fail-closed policy (P1-4 fix, 2026-07-14 review): if S3 was *configured*
+    (creds + bucket present) but initialization failed, RAISE. The previous
+    behavior fell back to InMemory silently, which made evidence uploads
+    appear to succeed while vanishing on serverless cold-start. The only
+    time InMemory is acceptable is when S3 is genuinely unconfigured (local
+    dev / CI / tests). The ``EVIDENCE_ALLOW_IN_MEMORY_FALLBACK=1`` env var
+    overrides for unusual staging setups that intentionally run memory-only.
     """
     bucket = os.environ.get("EVIDENCE_BUCKET_NAME")
     aws_key = os.environ.get("AWS_ACCESS_KEY_ID")
+    allow_fallback = os.environ.get("EVIDENCE_ALLOW_IN_MEMORY_FALLBACK") == "1"
     if bucket and aws_key:
         try:
             return S3EvidenceStore(
@@ -425,6 +440,12 @@ def build_evidence_store() -> EvidenceStore:
                 region=os.environ.get("EVIDENCE_S3_REGION", DEFAULT_S3_REGION),
                 kms_key_id=os.environ.get("EVIDENCE_KMS_KEY_ID"),
             )
-        except Exception:
-            return InMemoryEvidenceStore()
+        except Exception as exc:
+            if allow_fallback:
+                return InMemoryEvidenceStore()
+            raise RuntimeError(
+                f"Evidence S3 store configured but init failed: {exc}. "
+                f"Refusing to fall back to InMemory in a configured environment "
+                f"(set EVIDENCE_ALLOW_IN_MEMORY_FALLBACK=1 to override)."
+            ) from exc
     return InMemoryEvidenceStore()
