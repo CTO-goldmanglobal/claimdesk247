@@ -344,6 +344,15 @@ cases:
     - "GET as legal_staff → customer identity visible"
   expect: { panel_shop_redacted: true, legal_staff_visible: true }
 
+- id: T-25-038
+  gate: G-DASH
+  desc: "case status mapping — incomplete, likely, injury all return correct status_label"
+  flow:
+    - "consent + status → 'need information' (incomplete)"
+    - "fill + classify clear rear-end → 'recovering repair costs'"
+    - "fill + classify injury → 'A lawyer will call you'"
+  expect: { incomplete_label: "information", likely_label: "recovering", injury_label: "lawyer" }
+
 coverage_assertion:
   gates_exercised: [G-41, G-42, G-43, G-44, G-45, G-46, G-47, G-48, G-49, G-57, G-T6, G-EV, G-PD-DISC]
   parity_proven: true

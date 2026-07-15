@@ -1,5 +1,5 @@
 STAGE 2.5 ACCEPTANCE TEST REPORT (Engine-as-Endpoint)
-Generated: 2026-07-15T07:59:38.193611Z
+Generated: 2026-07-15T08:09:57.830854Z
 Suite: acceptance-tests.stage25.yaml
 Mode: local (TestClient)
 Stage 2 regression: /Volumes/Goldman Global/businesses/claimdesk247/stage-2/tests/run_acceptance.py
@@ -13,7 +13,7 @@ Stage 3 regression: /Volumes/Goldman Global/businesses/claimdesk247/stage-3/test
 [PASS] T-25-005   gate=G-43   esc-injury short-circuits with no band, terminal=True
 [PASS] T-25-006   gate=G-43   esc-multiparty short-circuits with no band
 [PASS] T-25-007   gate=G-44   full intake used opaque reference only; PII never in URL
-[PASS] T-25-008   gate=G-44   PDF served via opaque ref GF-C6897D1A
+[PASS] T-25-008   gate=G-44   PDF served via opaque ref GF-62463A8F
 [PASS] T-25-009   gate=G-45   customer -> 403 (server-side enforced)
 [PASS] T-25-010   gate=G-45   legal_staff -> 200, all 8 brief fields present
 [PASS] T-25-011   gate=G-46   deterministic ref in test mode: GF-0F7BC932
@@ -26,7 +26,7 @@ Stage 3 regression: /Volumes/Goldman Global/businesses/claimdesk247/stage-3/test
 [PASS] T-25-018   gate=G-57   legal_staff w/ MFA -> 200, brief fields present
 [PASS] T-25-019   gate=G-T6   scenario-question endpoint: start -> user_position -> user_motion
 [PASS] T-25-020   gate=G-EV   upload rejected pre-consent (403: consent required)
-[PASS] T-25-021   gate=G-EV   upload ok: sha256=43739c566e26…, s3_key=GF-2BD931CF/1d77a725-7fc3-41b4-a084-95e339db692d.png, audit written
+[PASS] T-25-021   gate=G-EV   upload ok: sha256=43739c566e26…, s3_key=GF-1449D6A4/fd06e5ad-57ef-443f-9305-33454042e89e.png, audit written
 [PASS] T-25-022   gate=G-EV   list ok (count=1); case view bound (evidence_count=1, pdf linked)
 [PASS] T-25-023   gate=G-EV   non-image -> 400; oversize -> 400 (size mentioned)
 [PASS] T-25-024   gate=G-PD-DISC  PD disclosure text returned with all 4 mandatory limbs; pd_disclosure_presented audit event fired
@@ -43,7 +43,8 @@ Stage 3 regression: /Volumes/Goldman Global/businesses/claimdesk247/stage-3/test
 [PASS] T-25-035   gate=G-RECEPT  slot corrected + audited (old+new); invalid enum → 400
 [PASS] T-25-036   gate=G-DASH  staff cases: legal_staff 200, customer 403, no-auth 403, no-MFA 403
 [PASS] T-25-037   gate=G-DASH  panel_shop: identity redacted; legal_staff: identity visible
+[PASS] T-25-038   gate=G-DASH  status labels: incomplete→We need some information from , likely→We're recovering your repair c, injury→A lawyer will call you
 ================================================================================
-TOTAL: 37  PASS: 37  FAIL: 0
+TOTAL: 38  PASS: 38  FAIL: 0
 
 All tests green. Report written to /Volumes/Goldman Global/businesses/claimdesk247/stage-2.5/deliverables/test-report.txt

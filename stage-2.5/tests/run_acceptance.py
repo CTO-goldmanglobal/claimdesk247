@@ -28,6 +28,8 @@ from typing import Any, Callable
 # at module-load time, so we set them BEFORE importing the wrapper.
 os.environ.setdefault("RATE_LIMIT_PER_MIN", "100000")
 os.environ.setdefault("RATE_LIMIT_BURST", "100000")
+os.environ.setdefault("READ_RATE_LIMIT_PER_MIN", "100000")
+os.environ.setdefault("READ_RATE_LIMIT_BURST", "100000")
 # Also disable CORS lockdown for tests: allow all origins from test client.
 os.environ.setdefault("CORS_ALLOWED_ORIGINS", "*")
 
@@ -1193,6 +1195,54 @@ def _drive_staff_cases_panel_shop_redacted(client: HTTPClient, case: dict) -> tu
     return True, "panel_shop: identity redacted; legal_staff: identity visible"
 
 
+def _drive_case_status(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-DASH §B1: GET /api/case/{ref}/status returns plain-English
+    status_label. Injury-escalated → 'A lawyer will call you'. Clear band
+    → 'We're recovering your repair costs'. Consent-gated."""
+    # Pre-consent → 403.
+    ref = _create_session(client)
+    code, _, _ = client.request("GET", f"/api/case/{ref}/status")
+    if code != 403:
+        return False, f"status before consent should 403, got {code}"
+    _accept_consent(client, ref)
+    # Incomplete intake → "we need some information from you".
+    code2, body2, _ = client.request("GET", f"/api/case/{ref}/status")
+    if code2 != 200:
+        return False, f"status 200 expected, got {code2}: {body2}"
+    label = (body2 or {}).get("status_label", "")
+    if "information" not in label.lower():
+        return False, f"incomplete case should say 'need information': {label}"
+    # Fill intake + classify as clear rear-end → 'recovering repair costs'.
+    _fill_intake(client, ref, {
+        "state_of_accident": "NSW", "accident_type": "rear-end",
+        "datetime_location": "x", "user_vehicle": "x", "other_vehicles": "x",
+        "movement_description": "x", "damage_locations": "rear",
+        "control_devices": "none", "police_attendance": "no",
+        "injuries": "none",
+    })
+    client.request("POST", "/api/classify", json={"reference": ref})
+    code3, body3, _ = client.request("GET", f"/api/case/{ref}/status")
+    label3 = (body3 or {}).get("status_label", "")
+    if "recovering" not in label3.lower():
+        return False, f"completed likely case should say 'recovering': {label3}"
+    # Injury case → 'A lawyer will call you'.
+    ref2 = _create_session(client)
+    _accept_consent(client, ref2)
+    _fill_intake(client, ref2, {
+        "state_of_accident": "NSW", "accident_type": "rear-end",
+        "datetime_location": "x", "user_vehicle": "x", "other_vehicles": "x",
+        "movement_description": "x", "damage_locations": "rear",
+        "control_devices": "none", "police_attendance": "no",
+        "injuries": "serious",
+    })
+    client.request("POST", "/api/classify", json={"reference": ref2})
+    code4, body4, _ = client.request("GET", f"/api/case/{ref2}/status")
+    label4 = (body4 or {}).get("status_label", "")
+    if "lawyer" not in label4.lower():
+        return False, f"injury case should say 'lawyer': {label4}"
+    return True, f"status labels: incomplete→{label[:30]}, likely→{label3[:30]}, injury→{label4[:30]}"
+
+
 DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-001": lambda c, x: _drive_classify_parity(c, x, REAR_END_INTAKE),
     "T-25-002": lambda c, x: _drive_classify_parity(c, x, GIVEWAY_INTAKE),
@@ -1236,6 +1286,7 @@ DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     # ---- Feature 6: staff dashboard endpoints (DASHBOARD-SPEC) ----
     "T-25-036": _drive_staff_cases_legal,
     "T-25-037": _drive_staff_cases_panel_shop_redacted,
+    "T-25-038": _drive_case_status,
 }
 
 

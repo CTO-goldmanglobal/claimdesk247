@@ -1555,6 +1555,88 @@ def create_app() -> FastAPI:
             "page_size": page_size,
         }
 
+    # ---- B1: GET /api/case/{ref}/status (DASHBOARD-SPEC §B1) ----
+    # Customer-facing status summary. Maps the engine's internal state +
+    # escalation + band into a plain-English status_label + next_step the
+    # customer sees on /my-cases and in email/SMS. The mapping is engine
+    # business logic — must live server-side, not derived in the frontend.
+    @app.get("/api/case/{ref}/status")
+    def get_case_status(ref: str, request: Request) -> Any:
+        """Return a customer-facing status for the case. Consent-gated
+        (the customer reaches this from their /my-cases dashboard after
+        logging in; the ref itself is the capability token)."""
+        s = _require_session_with_consent(ref, request)
+        # Derive the status label from engine state.
+        # Note: escalations can fire at slot time (serious injury → esc-injury
+        # before classify runs) OR at classify time. Check both sources.
+        escalated = None
+        if s.engine_result and s.engine_result.escalation:
+            escalated = s.engine_result.escalation
+        elif getattr(s, "escalation", None):
+            escalated = s.escalation
+        band = s.engine_result.band if s.engine_result else None
+        intake_done = s.state in (
+            "S5-FAULT-INFO", "S6-EVIDENCE", "S7-NEXT-STEPS", "S8-CLOSE",
+            "S4-CLASSIFY",
+        ) or bool(s.engine_result)
+        if escalated == "esc-injury":
+            status_label = "A lawyer will call you"
+            status_detail = ("Your matter has been referred for human review. "
+                             "A real person will call you within 1 business day.")
+            next_step = "We'll call you within 1 business day"
+        elif escalated == "esc-limitation":
+            status_label = "Your case is on hold"
+            status_detail = ("We need to talk through the timing of your matter. "
+                             "A real person will call you.")
+            next_step = "We'll call you within 1 business day"
+        elif escalated in ("esc-uninsured-driver", "esc-multiparty",
+                           "esc-fraud", "esc-dispute", "esc-advice",
+                           "esc-hitrun", "esc-vulnerable",
+                           "esc-serious-injury", "esc-workers-comp",
+                           "esc-govt-defendant"):
+            status_label = "We're reviewing your case"
+            status_detail = ("Your case needs a real person to look at it. "
+                             "We'll be in touch within 1 business day.")
+            next_step = "We'll call you within 1 business day"
+        elif not intake_done:
+            status_label = "We need some information from you"
+            status_detail = ("Your case file is incomplete. Continue in the "
+                             "chat to finish your accident report.")
+            next_step = "Open the chat to continue"
+        elif band in ("likely", "possible"):
+            status_label = "We're recovering your repair costs"
+            status_detail = ("Good news — based on what you told us, your "
+                             "recovery looks supported. We're working on it.")
+            next_step = "No action needed from you right now"
+        elif band == "unclear":
+            status_label = "Your case is being reviewed"
+            status_detail = ("The facts need a real person to assess. "
+                             "We'll be in touch within 1 business day.")
+            next_step = "We'll call you within 1 business day"
+        elif band == "insufficient":
+            status_label = "We need some information from you"
+            status_detail = ("We need a bit more detail to assess your case. "
+                             "Add photos or notes via the chat.")
+            next_step = "Open the chat to add detail"
+        else:
+            status_label = "We've received your details"
+            status_detail = "We've got your accident report."
+            next_step = None
+        # Light audit.
+        AUDIT.append(
+            session_id=s.session_id, user=_client_ip(request),
+            action="case_status_viewed",
+            inputs={"reference": ref, "status_label": status_label},
+            rule_path=[], output={"band": band, "escalated": escalated},
+        )
+        return {
+            "ref": ref,
+            "status_label": status_label,
+            "status_detail": status_detail,
+            "next_step": next_step,
+            "updated_at": s.created_at,
+        }
+
     # ---- /api/classify (G-41, G-42, G-43) ----
     def _render_pdf_for_session(s: Any) -> bytes:
         """Render the customer-facing summary PDF for a session.
