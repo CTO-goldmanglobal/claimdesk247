@@ -53,12 +53,13 @@ class Session:
 # customer picks motor, the motor branch runs as before. When they pick PL or
 # med-neg, the matching branch's slots run instead. The injuries check
 # (G-19/G-20) stays reachable from any state.
-# National PD coverage: every Australian jurisdiction is selectable at intake.
-# "outside_nsw" kept as legacy label for "outside Australia / unknown" → escalate.
-# Motor/PL/med-neg remain NSW-live; non-NSW + non-PD escalates in the engine.
-# PD trees are unsigned until Legal Head signs before launch (G-PROD-LOCK).
+# NSW-only intake (stage 1, 2026-07-15 user decision). All other states
+# are held until stage 2 (VIC/QLD verify items + citation audit close).
+# "outside_nsw" kept as the catch-all label for anything outside NSW.
+# Non-NSW customers get a human callback via the state-scope guard; their
+# intake is NOT recorded as a bandable case.
 MULTI_STATE_OPTIONS: list[str] = [
-    "NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT", "outside_nsw",
+    "NSW", "outside_nsw",
 ]
 
 MOTOR_SLOTS: list[dict[str, Any]] = [
@@ -315,15 +316,15 @@ def submit_slot(session: Session, slot_id: int, value: Any) -> dict[str, Any]:
         session.reference = _new_reference()
         return {"escalation": "esc-injury", "end_state": "SX-ESCALATE", "reference": session.reference}
 
-    # State-scope guard after slot 1 (G-21). All Australian jurisdictions continue;
-    # "outside_nsw" / anything else routes to a human callback — the lead is
-    # captured, not dead-ended. Non-NSW PD trees still escalate later via
-    # G-PROD-LOCK (unsigned-scenario) until Legal Head signs before launch.
-    _AU_STATES = ("NSW", "VIC", "QLD", "WA", "SA", "TAS", "ACT", "NT")
-    if slot_def["slot"] == "state_of_accident" and value not in _AU_STATES:
+    # State-scope guard after slot 1 (G-21). Stage 1 = NSW only (user
+    # decision 2026-07-15): anything that isn't NSW routes to a human
+    # callback — the lead is captured, not dead-ended, but the engine does
+    # NOT record a bandable case outside NSW. Stage 2 will relax this to
+    # VIC/QLD after their verify items + citation audit close.
+    if slot_def["slot"] == "state_of_accident" and value != "NSW":
         session.state = "SX-ESCALATE"
         session.escalation = "state-scope"
-        session.escalation_reason = f"out-of-scope accident state: {value}"
+        session.escalation_reason = f"non-NSW accident (stage 1 NSW-only): {value}"
         session.reference = _new_reference()
         return {"state_scope_guard_shown": True, "escalation": "callback",
                 "end_state": "SX-ESCALATE", "reference": session.reference}

@@ -1076,35 +1076,40 @@ def _drive_slot_correction(client: HTTPClient, case: dict) -> tuple[bool, str]:
     """G-RECEPT: PATCH /api/slot/{ref} corrects a prior answer; old value
     audited; new value applied; invalid enum → 400; consent-gated."""
     from app.wrap import AUDIT
-    # Pre-fill with state=NSW, then correct it.
+    # Pre-fill with a text slot (user_vehicle), then correct it. Using a
+    # text slot avoids the stage-1 NSW-only enum restriction on state.
     code, body, _ = client.request("POST", "/api/session",
-        json={"channel": "web", "prefill": {"state": "NSW"}})
+        json={"channel": "web", "prefill": {"state": "NSW",
+                                             "user_vehicle": "2019 Toyota Camry"}})
     ref = body["reference"]
     # Pre-consent → 403.
     code2, _, _ = client.request("PATCH", f"/api/slot/{ref}",
-        json={"slot": "state", "value": "VIC", "reason": "correction"})
+        json={"slot": "user_vehicle", "value": "2020 Mazda CX-5", "reason": "correction"})
     if code2 != 403:
         return False, f"correction before consent should 403, got {code2}"
     _accept_consent(client, ref)
     before = len(AUDIT.all())
-    # Correct state NSW → VIC.
+    # Correct user_vehicle.
     code3, body3, _ = client.request("PATCH", f"/api/slot/{ref}",
-        json={"slot": "state", "value": "VIC", "reason": "happened in VIC, not NSW"})
+        json={"slot": "user_vehicle", "value": "2020 Mazda CX-5 (silver)",
+              "reason": "adding colour"})
     if code3 != 200:
         return False, f"correction status {code3}: {body3}"
-    if body3.get("old_value") != "NSW" or body3.get("new_value") != "VIC":
+    if body3.get("old_value") != "2019 Toyota Camry" or \
+       body3.get("new_value") != "2020 Mazda CX-5 (silver)":
         return False, f"old/new mismatch: {body3}"
     # Audit fired with old + new.
     events = [e for e in AUDIT.all()[before:] if e.action == "slot_corrected"]
     if not events:
         return False, "slot_corrected audit not fired"
-    if events[0].inputs.get("old_value") != "NSW":
+    if events[0].inputs.get("old_value") != "2019 Toyota Camry":
         return False, f"audit old_value wrong: {events[0].inputs}"
-    # Verify the session now has VIC.
+    # Verify the session now has the new value.
     code4, body4, _ = client.request("GET", f"/api/intake/{ref}/review")
-    if (body4 or {}).get("intake", {}).get("state") != "VIC":
-        return False, f"session state not updated to VIC: {body4}"
-    # Invalid enum → 400.
+    if (body4 or {}).get("intake", {}).get("user_vehicle") != "2020 Mazda CX-5 (silver)":
+        return False, f"session user_vehicle not updated: {body4}"
+    # Invalid enum → 400 (try to set state to a non-NSW value, rejected by
+    # the NSW-only enum restriction).
     code5, _, _ = client.request("PATCH", f"/api/slot/{ref}",
         json={"slot": "state", "value": "NOT_A_STATE"})
     if code5 != 400:
