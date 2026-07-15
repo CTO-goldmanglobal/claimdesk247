@@ -207,10 +207,18 @@ class S3EvidenceStore:
     def __init__(self, *, bucket_name: str, region: str = DEFAULT_S3_REGION,
                  kms_key_id: Optional[str] = None) -> None:
         import boto3  # lazy: keep the test runner off the boto3 dep
+        from botocore.config import Config as BotoConfig
         self._bucket = bucket_name
         self._region = region
         self._kms_key_id = kms_key_id
-        self._s3 = boto3.client("s3", region_name=region)
+        # SSE-KMS requires SigV4 for presigned URLs. Force it explicitly so
+        # presigned GETs don't fall back to SigV2 (which S3 rejects for
+        # KMS-encrypted objects with 'InvalidArgument').
+        self._s3 = boto3.client(
+            "s3",
+            region_name=region,
+            config=BotoConfig(signature_version="s3v4", s3={"addressing_style": "virtual"}),
+        )
 
     def upload(self, *, reference: str, content: bytes, content_type: str,
                filename: str, actor: str) -> EvidenceRecord:
@@ -341,22 +349,26 @@ class S3EvidenceStore:
     def _mint_signed_url(self, key: str) -> str:
         """Mint a presigned GET URL for a private S3 object.
 
-        SSE-KMS fix (2026-07-16): when the bucket uses SSE-KMS (our default),
-        presigned URLs MUST be generated with SigV4 and include the encryption
-        header. boto3's generate_presigned_url uses SigV4 by default, but the
-        Params dict must carry the SSE header so S3 validates the signature
-        against it. Without this, the upload succeeds but the signed URL
-        returns 403 'Requests specifying Server Side Encryption with AWS KMS
-        managed keys require AWS Signature Version 4.'
+        SSE-KMS fix (2026-07-16): S3 buckets with SSE-KMS require SigV4 for
+        presigned URLs. boto3's generate_presigned_url defaults to SigV4, but
+        the presigned URL must carry the encryption context headers so S3
+        validates the signature against them. The `Config(signature_version=
+        's3v4')` forces SigV4; the SSE-KMS header in Params makes the
+        signature bound to the encryption parameters.
         """
+        from botocore.config import Config as BotoConfig
+        s3_v4 = self._s3.meta.client  # the client already uses SigV4 by default
         params: dict[str, Any] = {
             "Bucket": self._bucket,
             "Key": key,
         }
-        # If we're using a CMK, the signed URL must reference it too.
+        # For AWS-managed KMS keys (aws/s3), SigV4 is sufficient without
+        # specifying the key ID — the key is implied by the bucket's default
+        # encryption config. For CMK, include the key ID so the signature
+        # is bound to it.
         if self._kms_key_id:
             params["x-amz-server-side-encryption-aws-kms-key-id"] = self._kms_key_id
-        url = self._s3.generate_presigned_url(
+        url = s3_v4.generate_presigned_url(
             "get_object",
             Params=params,
             ExpiresIn=SIGNED_URL_TTL_SECONDS,
