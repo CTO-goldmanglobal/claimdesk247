@@ -257,6 +257,17 @@ def render_summary_pdf(*, reference: str, intake: dict[str, Any],
     # ----- Branded header -----
     _header_logo_and_title(flow, styles, reference)
 
+    # ----- Section 0: Customer contact (if identity was captured) -----
+    identity = intake.get("_identity") if isinstance(intake.get("_identity"), dict) else None
+    if identity:
+        flow.append(Paragraph("Customer contact", styles["h2"]))
+        contact_rows = [
+            ("Name", str(identity.get("customer_name", "—"))),
+            ("Mobile", str(identity.get("customer_mobile", "—"))),
+            ("Email", str(identity.get("customer_email", "—"))),
+        ]
+        flow.append(_kv_table(contact_rows))
+
     # ----- Section 1: Accident details -----
     flow.append(Paragraph("1. Accident details", styles["h2"]))
     details_rows = [

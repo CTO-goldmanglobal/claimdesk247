@@ -985,6 +985,131 @@ def _drive_intake_review(client: HTTPClient, case: dict) -> tuple[bool, str]:
                   f"{body3['notes_count']} note, consent-gated (403 pre-consent)")
 
 
+# -----------------------------------------------------------------------
+# Feature 5 — Receptionist: identity, bind-user, case list, slot correction
+# (2026-07-15, RECEPTIONIST-ROBOT-SPEC §2 + §6)
+# -----------------------------------------------------------------------
+
+def _drive_identity_capture(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-RECEPT: POST /api/session/{ref}/identity captures name/mobile/email;
+    invalid formats rejected; consent-gated; audit fires identity_captured."""
+    from app.wrap import AUDIT
+    ref = _create_session(client)
+    # Without consent → 403.
+    code, _, _ = client.request("POST", f"/api/session/{ref}/identity",
+        json={"customer_name": "Jane", "customer_mobile": "0412345678",
+              "customer_email": "jane@test.com"})
+    if code != 403:
+        return False, f"identity before consent should 403, got {code}"
+    _accept_consent(client, ref)
+    before = len(AUDIT.all())
+    code, body, _ = client.request("POST", f"/api/session/{ref}/identity",
+        json={"customer_name": "Jane Citizen", "customer_mobile": "0412 345 678",
+              "customer_email": "jane.citizen@test.com.au"})
+    if code != 200:
+        return False, f"identity POST status {code}: {body}"
+    if not (body or {}).get("stored"):
+        return False, f"identity not stored: {body}"
+    # Audit fired.
+    events = [e for e in AUDIT.all()[before:] if e.action == "identity_captured"]
+    if not events:
+        return False, "identity_captured audit not fired"
+    # Invalid email → 400.
+    code2, _, _ = client.request("POST", f"/api/session/{ref}/identity",
+        json={"customer_name": "X", "customer_mobile": "0412345678",
+              "customer_email": "not-an-email"})
+    if code2 != 400:
+        return False, f"invalid email should 400, got {code2}"
+    # Short mobile → 400.
+    code3, _, _ = client.request("POST", f"/api/session/{ref}/identity",
+        json={"customer_name": "X", "customer_mobile": "123",
+              "customer_email": "x@y.com"})
+    if code3 != 400:
+        return False, f"short mobile should 400, got {code3}"
+    return True, "identity captured + audited; invalid email/mobile → 400"
+
+
+def _drive_bind_user_and_list_cases(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-RECEPT: POST bind-user → GET /api/cases?user_id= returns the case;
+    re-bind same user is no-op; bind different user → 409."""
+    ref = _create_session(client)
+    _accept_consent(client, ref)
+    uid = "supabase-uid-abc123def456"
+    # Bind.
+    code, body, _ = client.request("POST", f"/api/session/{ref}/bind-user",
+        json={"supabase_user_id": uid})
+    if code != 200 or not (body or {}).get("bound"):
+        return False, f"bind failed: {code} {body}"
+    if body.get("already_bound") is not False:
+        return False, f"first bind should report already_bound=false: {body}"
+    # Re-bind same user → no-op.
+    code2, body2, _ = client.request("POST", f"/api/session/{ref}/bind-user",
+        json={"supabase_user_id": uid})
+    if code2 != 200 or not body2.get("already_bound"):
+        return False, f"re-bind should be no-op: {code2} {body2}"
+    # Bind different user → 409.
+    code3, _, _ = client.request("POST", f"/api/session/{ref}/bind-user",
+        json={"supabase_user_id": "different-user-xyz"})
+    if code3 != 409:
+        return False, f"different-user bind should 409, got {code3}"
+    # List cases for the user.
+    code4, body4, _ = client.request("GET", f"/api/cases?user_id={uid}")
+    if code4 != 200:
+        return False, f"cases list status {code4}: {body4}"
+    cases = (body4 or {}).get("cases", [])
+    if not any(c.get("reference") == ref for c in cases):
+        return False, f"case {ref} not in user's cases: {cases}"
+    # Different user → empty list.
+    code5, body5, _ = client.request("GET", "/api/cases?user_id=wrong-user")
+    if code5 != 200 or (body5 or {}).get("count", 0) != 0:
+        return False, f"wrong user should see 0 cases: {body5}"
+    # Missing user_id → 400.
+    code6, _, _ = client.request("GET", "/api/cases")
+    if code6 != 400:
+        return False, f"missing user_id should 400, got {code6}"
+    return True, "bind + list cases + re-bind no-op + different-user 409"
+
+
+def _drive_slot_correction(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-RECEPT: PATCH /api/slot/{ref} corrects a prior answer; old value
+    audited; new value applied; invalid enum → 400; consent-gated."""
+    from app.wrap import AUDIT
+    # Pre-fill with state=NSW, then correct it.
+    code, body, _ = client.request("POST", "/api/session",
+        json={"channel": "web", "prefill": {"state": "NSW"}})
+    ref = body["reference"]
+    # Pre-consent → 403.
+    code2, _, _ = client.request("PATCH", f"/api/slot/{ref}",
+        json={"slot": "state", "value": "VIC", "reason": "correction"})
+    if code2 != 403:
+        return False, f"correction before consent should 403, got {code2}"
+    _accept_consent(client, ref)
+    before = len(AUDIT.all())
+    # Correct state NSW → VIC.
+    code3, body3, _ = client.request("PATCH", f"/api/slot/{ref}",
+        json={"slot": "state", "value": "VIC", "reason": "happened in VIC, not NSW"})
+    if code3 != 200:
+        return False, f"correction status {code3}: {body3}"
+    if body3.get("old_value") != "NSW" or body3.get("new_value") != "VIC":
+        return False, f"old/new mismatch: {body3}"
+    # Audit fired with old + new.
+    events = [e for e in AUDIT.all()[before:] if e.action == "slot_corrected"]
+    if not events:
+        return False, "slot_corrected audit not fired"
+    if events[0].inputs.get("old_value") != "NSW":
+        return False, f"audit old_value wrong: {events[0].inputs}"
+    # Verify the session now has VIC.
+    code4, body4, _ = client.request("GET", f"/api/intake/{ref}/review")
+    if (body4 or {}).get("intake", {}).get("state") != "VIC":
+        return False, f"session state not updated to VIC: {body4}"
+    # Invalid enum → 400.
+    code5, _, _ = client.request("PATCH", f"/api/slot/{ref}",
+        json={"slot": "state", "value": "NOT_A_STATE"})
+    if code5 != 400:
+        return False, f"invalid enum should 400, got {code5}"
+    return True, "slot corrected + audited (old+new); invalid enum → 400"
+
+
 DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-001": lambda c, x: _drive_classify_parity(c, x, REAR_END_INTAKE),
     "T-25-002": lambda c, x: _drive_classify_parity(c, x, GIVEWAY_INTAKE),
@@ -1021,6 +1146,10 @@ DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-030": _drive_checklist_prefill,
     "T-25-031": _drive_intake_note,
     "T-25-032": _drive_intake_review,
+    # ---- Feature 5: receptionist identity + bind + list + correct (2026-07-15) ----
+    "T-25-033": _drive_identity_capture,
+    "T-25-034": _drive_bind_user_and_list_cases,
+    "T-25-035": _drive_slot_correction,
 }
 
 

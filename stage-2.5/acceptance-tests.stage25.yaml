@@ -294,6 +294,36 @@ cases:
     - "GET /api/intake/{ref}/review → 200 with slots_filled_count + notes_count"
   expect: { http_pre_consent: 403, http_post_consent: 200, has_intake: true, notes_count: 1 }
 
+# ---- Feature 5: receptionist identity + bind + list + correct (2026-07-15) ----
+- id: T-25-033
+  gate: G-RECEPT
+  desc: "identity capture (name/mobile/email) + format validation + consent-gated"
+  flow:
+    - "session + consent"
+    - "POST /api/session/{ref}/identity {name, mobile, email}"
+    - "POST /api/session/{ref}/identity {invalid email} → 400"
+  expect: { stored: true, audit_action: identity_captured, invalid_400: true }
+
+- id: T-25-034
+  gate: G-RECEPT
+  desc: "bind Supabase user + list cases + re-bind no-op + different-user 409"
+  flow:
+    - "session + consent + bind-user"
+    - "GET /api/cases?user_id=<id> → list with the case"
+    - "POST bind-user same id → already_bound=true"
+    - "POST bind-user different id → 409"
+  expect: { bound: true, listed: true, already_bound: true, conflict_409: true }
+
+- id: T-25-035
+  gate: G-RECEPT
+  desc: "slot correction (PATCH) — old value audited, new value applied, enum validated"
+  flow:
+    - "session with prefill {state: NSW} + consent"
+    - "PATCH /api/slot/{ref} {slot: state, value: VIC, reason: correction}"
+    - "GET review → state now VIC"
+    - "PATCH invalid enum → 400"
+  expect: { corrected: true, old_value: NSW, new_value: VIC, audit_action: slot_corrected, invalid_400: true }
+
 coverage_assertion:
   gates_exercised: [G-41, G-42, G-43, G-44, G-45, G-46, G-47, G-48, G-49, G-57, G-T6, G-EV, G-PD-DISC]
   parity_proven: true

@@ -665,6 +665,32 @@ class NoteRequest(BaseModel):
     kind: Optional[str] = None      # "story" | "correction" | "addition"
 
 
+class IdentityRequest(BaseModel):
+    """Customer identity capture (2026-07-15, receptionist spec §2.1).
+    Stored on the session so the lawyer brief has name + mobile + email.
+    Validation is light (format check only) — the lawyer verifies identity."""
+    customer_name: str
+    customer_mobile: str
+    customer_email: str
+
+
+class BindUserRequest(BaseModel):
+    """Bind a case to a Supabase auth identity (2026-07-15, receptionist spec §2.2).
+    After Supabase magic-link login, the frontend posts the supabase_user_id
+    here so future logins can list this case via GET /api/cases?user_id=."""
+    supabase_user_id: str
+
+
+class SlotCorrectionRequest(BaseModel):
+    """Correct a prior slot answer (2026-07-15, receptionist spec §6).
+    Append-only audit — the old value is recorded in the audit trail, the
+    new value overwrites session.intake[slot]. Notes that the customer
+    revised their story are evidentiary."""
+    slot: str
+    value: Any
+    reason: Optional[str] = None    # "correction" | "addition" | "clarification"
+
+
 class ScenarioQuestionRequest(BaseModel):
     """T6: scenario-question injection. No question_id => start (returns the
     first scenario question). With question_id+value => submit an answer."""
@@ -1188,6 +1214,204 @@ def create_app() -> FastAPI:
             rule_path=[], output={"notes_count": len(notes)},
         )
         return {"stored": True, "notes_count": len(notes)}
+
+    # ---- /api/session/{ref}/identity (2026-07-15, receptionist spec §2.1) ----
+    # Customer identity capture: name + mobile + email. Stored on the session
+    # (under _identity) so the lawyer brief can include them. The email drives
+    # the Supabase magic-link login; the supabase_user_id is bound separately
+    # via /api/session/{ref}/bind-user after login completes.
+    _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    _MOBILE_RE = re.compile(r"^[\d\s\+\-\(\)]{8,20}$")
+
+    @app.post("/api/session/{ref}/identity")
+    def post_identity(ref: str, request: Request,
+                      payload: IdentityRequest = Body(...)) -> Any:
+        """Capture customer name + mobile + email. Consent-gated (the identity
+        IS PII). Validates format lightly; the lawyer verifies identity at
+        callback. Audit-logs the capture (not the values — the values live on
+        the session, the audit records that identity was captured)."""
+        s = SESSIONS.by_reference(ref)
+        if s is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        if not s.consent:
+            raise HTTPException(status_code=403, detail="consent required")
+        # Light format validation.
+        name = (payload.customer_name or "").strip()
+        mobile = (payload.customer_mobile or "").strip()
+        email = (payload.customer_email or "").strip().lower()
+        if len(name) < 2:
+            raise HTTPException(status_code=400, detail="name too short")
+        if not _MOBILE_RE.match(mobile):
+            raise HTTPException(status_code=400,
+                                detail="mobile format invalid (8-20 digits/spaces)")
+        if not _EMAIL_RE.match(email):
+            raise HTTPException(status_code=400, detail="email format invalid")
+        # Store on the session under _identity (engine ignores _-prefixed keys).
+        s.intake["_identity"] = {
+            "customer_name": name,
+            "customer_mobile": mobile,
+            "customer_email": email,
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+        }
+        SESSIONS.put(s)
+        # Audit — record that identity was captured, NOT the values (the values
+        # are on the session; the audit just proves WHEN identity was provided).
+        AUDIT.append(
+            session_id=s.session_id, user=_client_ip(request),
+            action="identity_captured",
+            inputs={"reference": ref,
+                    "email_domain": email.split("@")[-1] if "@" in email else ""},
+            rule_path=[], output={"state": s.state},
+        )
+        return {"stored": True, "email": email,
+                "next": "bind-user"}   # frontend proceeds to magic-link login
+
+    # ---- /api/session/{ref}/bind-user (2026-07-15, receptionist spec §2.2) ----
+    # After Supabase magic-link login completes, the frontend posts the
+    # supabase_user_id here so the case is bound to the customer's auth
+    # identity. Future logins list this case via GET /api/cases?user_id=.
+    @app.post("/api/session/{ref}/bind-user")
+    def bind_user(ref: str, request: Request,
+                  payload: BindUserRequest = Body(...)) -> Any:
+        """Bind a case to a Supabase auth identity. Idempotent — re-binding
+        to the same user is a no-op; binding to a DIFFERENT user is refused
+        (a case can only belong to one customer). Consent-gated."""
+        s = SESSIONS.by_reference(ref)
+        if s is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        if not s.consent:
+            raise HTTPException(status_code=403, detail="consent required")
+        # Identity is stored on intake under _supabase_user_id (engine ignores
+        # _-prefixed keys for banding). Check there for the existing binding.
+        existing = s.intake.get("_supabase_user_id")
+        if existing and existing != payload.supabase_user_id:
+            raise HTTPException(
+                status_code=409,
+                detail="case already bound to a different user"
+            )
+        if existing == payload.supabase_user_id:
+            return {"bound": True, "already_bound": True}
+        s.intake["_supabase_user_id"] = payload.supabase_user_id
+        SESSIONS.put(s)
+        AUDIT.append(
+            session_id=s.session_id, user=_client_ip(request),
+            action="case_bound_to_user",
+            inputs={"reference": ref,
+                    "supabase_user_id_prefix": payload.supabase_user_id[:8]},
+            rule_path=[], output={"state": s.state},
+        )
+        return {"bound": True, "already_bound": False}
+
+    # ---- /api/cases?user_id=<id> (2026-07-15, receptionist spec §2.2) ----
+    # List all cases bound to a Supabase user. Used by the customer's
+    # dashboard after login ("your cases"). Consent is implied by the auth
+    # binding — the customer logged in, so they can see their own cases.
+    @app.get("/api/cases")
+    def list_user_cases(request: Request,
+                        user_id: str = "") -> Any:
+        """Return all sessions bound to a Supabase user_id. The user_id query
+        param is required. Each case in the response includes ref, state,
+        band (if classified), identity name (if captured), and timestamps."""
+        if not user_id:
+            raise HTTPException(status_code=400,
+                                detail="user_id query parameter required")
+        # Iterate all sessions and filter by _supabase_user_id. The session
+        # store exposes .list() (in-memory) or a SQL query (production Supabase
+        # store). Rate-limit to prevent enumeration.
+        ip = _client_ip(request)
+        if not READ_RATE_LIMITER.allow(ip):
+            raise HTTPException(status_code=429,
+                                detail="rate limit exceeded; retry after a minute",
+                                headers={"Retry-After": "60"})
+        # Use .list() if available (in-memory), else fall back to .all() if
+        # the store exposes it (some adapters). The production Supabase store
+        # should add a purpose-built query; this is the in-memory path.
+        sessions_iter = (
+            SESSIONS.list() if hasattr(SESSIONS, "list")
+            else (SESSIONS.all() if hasattr(SESSIONS, "all") else [])
+        )
+        matching: list[dict[str, Any]] = []
+        for s in sessions_iter:
+            if s.intake.get("_supabase_user_id") != user_id:
+                continue
+            identity = s.intake.get("_identity", {})
+            matching.append({
+                "reference": s.reference,
+                "state": s.state,
+                "customer_name": identity.get("customer_name"),
+                "band": s.engine_result.band if s.engine_result else None,
+                "escalation": s.engine_result.escalation if s.engine_result else None,
+                "intake_completed": s.state in (
+                    "S5-FAULT-INFO", "S6-EVIDENCE", "S7-NEXT-STEPS", "S8-CLOSE",
+                    "S4-CLASSIFY",
+                ) or bool(s.engine_result),
+                "created_at": s.created_at,
+            })
+        AUDIT.append(
+            session_id=f"user:{user_id[:8]}", user=ip,
+            action="cases_listed",
+            inputs={"user_id_prefix": user_id[:8], "count": len(matching)},
+            rule_path=[], output={"count": len(matching)},
+        )
+        return {"user_id": user_id, "count": len(matching), "cases": matching}
+
+    # ---- PATCH /api/slot/{ref} (2026-07-15, receptionist spec §6) ----
+    # Correct a prior slot answer. The old value is recorded in the audit
+    # trail (append-only); the new value overwrites session.intake[slot].
+    # This is the receptionist's "edit this answer" feature. The correction
+    # is audited as a separate event so the lawyer can see how the customer's
+    # story evolved — never silently mutate.
+    @app.patch("/api/slot/{ref}")
+    def correct_slot(ref: str, request: Request,
+                     payload: SlotCorrectionRequest = Body(...)) -> Any:
+        """Correct a prior slot value. Validates the new value against the
+        slot's enum (if applicable). Audit-logs the OLD value + NEW value +
+        reason. If the correction triggers a new escalation (e.g. updating
+        injuries: none → minor), the engine's escalation chain re-runs on
+        the next /api/classify call — this endpoint does not auto-classify."""
+        s = SESSIONS.by_reference(ref)
+        if s is None:
+            raise HTTPException(status_code=404, detail="session not found")
+        if not s.consent:
+            raise HTTPException(status_code=403, detail="consent required")
+        slot_name = payload.slot
+        new_value = payload.value
+        # Find the slot definition to validate against (if it's a known slot).
+        # Check all branch slot lists + the alias 'state' → 'state_of_accident'.
+        lookup_name = slot_name
+        if lookup_name == "state":
+            lookup_name = "state_of_accident"
+        slot_def = None
+        all_slots = (stage3_state_machine.MOTOR_SLOTS
+                     + stage3_state_machine.PD_SLOTS
+                     + stage3_state_machine.PL_SLOTS
+                     + stage3_state_machine.MEDNEG_SLOTS)
+        for sd in all_slots:
+            if sd["slot"] == lookup_name:
+                slot_def = sd
+                break
+        if slot_def:
+            valid, err = stage3_state_machine._validate_slot(slot_def, new_value)
+            if not valid:
+                raise HTTPException(status_code=400, detail=err)
+        # Engine-critical slots (injuries, claim_type, state) are allowed to
+        # be corrected — the customer's story can evolve. The re-classification
+        # will pick up the new value.
+        old_value = s.intake.get(slot_name)
+        s.intake[slot_name] = new_value
+        SESSIONS.put(s)
+        # Audit — record OLD + NEW + reason. This is evidentiary.
+        AUDIT.append(
+            session_id=s.session_id, user=_client_ip(request),
+            action="slot_corrected",
+            inputs={"reference": ref, "slot": slot_name,
+                    "old_value": str(old_value)[:200],
+                    "new_value": str(new_value)[:200],
+                    "reason": payload.reason or "correction"},
+            rule_path=[], output={"state": s.state},
+        )
+        return {"corrected": True, "slot": slot_name,
+                "old_value": old_value, "new_value": new_value}
 
     # ---- /api/classify (G-41, G-42, G-43) ----
     def _render_pdf_for_session(s: Any) -> bytes:
