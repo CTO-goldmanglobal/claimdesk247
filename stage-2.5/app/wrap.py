@@ -1072,11 +1072,15 @@ def create_app() -> FastAPI:
                 raise HTTPException(status_code=400, detail=f"unknown slot: {req.slot}")
             stage3_state_machine.submit_slot(s, slot_id, req.value)
             SESSIONS.put(s)  # F-E: persist mutation
-            # Escalation (serious injury / re-prompt cap) -> end the Q&A; the
-            # UI calls classify, which returns the calm handoff message.
+            # Escalation (serious injury / re-prompt cap / state-scope) → end
+            # the Q&A. Surface the escalation code + reference so the frontend
+            # can branch its handoff panel (esc-injury vs state-scope vs other).
             if s.escalation:
                 return {"ref": s.reference, "next": dict(_DONE_QUESTION),
-                        "progress": _progress(s.intake), "escalated": True}
+                        "progress": _progress(s.intake), "escalated": True,
+                        "escalation": s.escalation,
+                        "escalation_reason": s.escalation_reason,
+                        "reference": s.reference}
             # Valid -> advance; invalid -> _next_question returns the SAME slot
             # (not yet stored), so the UI simply re-asks it.
             return {"ref": s.reference, "next": _next_question(s.intake),
