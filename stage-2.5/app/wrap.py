@@ -691,6 +691,11 @@ class SlotCorrectionRequest(BaseModel):
     reason: Optional[str] = None    # "correction" | "addition" | "clarification"
 
 
+class AssignRequest(BaseModel):
+    """Case assignment (2026-07-15, DASHBOARD-SPEC §A3). Admin-only."""
+    assign_to_email: str
+
+
 class ScenarioQuestionRequest(BaseModel):
     """T6: scenario-question injection. No question_id => start (returns the
     first scenario question). With question_id+value => submit an answer."""
@@ -1636,6 +1641,35 @@ def create_app() -> FastAPI:
             "next_step": next_step,
             "updated_at": s.created_at,
         }
+
+    # ---- A3: POST /api/staff/cases/{ref}/assign (DASHBOARD-SPEC §A3) ----
+    # Admin-only case assignment. Stores the assignee email on the session
+    # under _assigned_to (engine ignores _-prefixed keys). Audit records
+    # old + new assignee so the case-handover trail is visible.
+    @app.post("/api/staff/cases/{ref}/assign")
+    def staff_assign_case(ref: str, request: Request,
+                          payload: AssignRequest = Body(...)) -> Any:
+        """Assign a case to a staff member (by email). Admin role only.
+        The assignee email must be a known staff user (exists in the auth
+        user table / stub users)."""
+        user = _require_staff_user(request, "admin")
+        s = SESSIONS.by_reference(ref)
+        if s is None:
+            raise HTTPException(status_code=404, detail="case not found")
+        assignee = (payload.assign_to_email or "").strip().lower()
+        if not assignee or "@" not in assignee:
+            raise HTTPException(status_code=400, detail="valid email required")
+        old_assignee = s.intake.get("_assigned_to")
+        s.intake["_assigned_to"] = assignee
+        SESSIONS.put(s)
+        AUDIT.append(
+            session_id=s.session_id, user=user.email,
+            action="case_assigned",
+            inputs={"reference": ref, "old": old_assignee, "new": assignee},
+            rule_path=[], output={"state": s.state},
+        )
+        return {"ref": ref, "assigned_to": assignee,
+                "previously": old_assignee}
 
     # ---- /api/classify (G-41, G-42, G-43) ----
     def _render_pdf_for_session(s: Any) -> bytes:

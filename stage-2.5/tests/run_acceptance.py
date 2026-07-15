@@ -1243,6 +1243,46 @@ def _drive_case_status(client: HTTPClient, case: dict) -> tuple[bool, str]:
     return True, f"status labels: incomplete→{label[:30]}, likely→{label3[:30]}, injury→{label4[:30]}"
 
 
+def _drive_case_assign(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-DASH §A3: POST /api/staff/cases/{ref}/assign — admin only;
+    legal_staff → 403; audit records old + new assignee."""
+    ref = _create_session(client)
+    _accept_consent(client, ref)
+    # legal_staff → 403 (admin only).
+    code, _, _ = client.request("POST",
+        f"/api/staff/cases/{ref}/assign?as_email=lou@legal.example",
+        json={"assign_to_email": "someone@example.com"},
+        headers={"X-MFA-Verified": "1"})
+    if code != 403:
+        return False, f"legal_staff assign should 403, got {code}"
+    # admin → 200.
+    code2, body2, _ = client.request("POST",
+        f"/api/staff/cases/{ref}/assign?as_email=ada@admin.example",
+        json={"assign_to_email": "lou@legal.example"},
+        headers={"X-MFA-Verified": "1"})
+    if code2 != 200:
+        return False, f"admin assign should 200, got {code2}: {body2}"
+    if (body2 or {}).get("assigned_to") != "lou@legal.example":
+        return False, f"assigned_to mismatch: {body2}"
+    # Re-assign → audit records old.
+    code3, body3, _ = client.request("POST",
+        f"/api/staff/cases/{ref}/assign?as_email=ada@admin.example",
+        json={"assign_to_email": "ada@admin.example"},
+        headers={"X-MFA-Verified": "1"})
+    if code3 != 200:
+        return False, f"re-assign should 200, got {code3}"
+    if (body3 or {}).get("previously") != "lou@legal.example":
+        return False, f"previous assignee not recorded: {body3}"
+    # Invalid email → 400.
+    code4, _, _ = client.request("POST",
+        f"/api/staff/cases/{ref}/assign?as_email=ada@admin.example",
+        json={"assign_to_email": "not-an-email"},
+        headers={"X-MFA-Verified": "1"})
+    if code4 != 400:
+        return False, f"invalid email should 400, got {code4}"
+    return True, "assign: admin 200, legal 403, re-assign tracks previous, invalid → 400"
+
+
 DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-001": lambda c, x: _drive_classify_parity(c, x, REAR_END_INTAKE),
     "T-25-002": lambda c, x: _drive_classify_parity(c, x, GIVEWAY_INTAKE),
@@ -1287,6 +1327,7 @@ DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-036": _drive_staff_cases_legal,
     "T-25-037": _drive_staff_cases_panel_shop_redacted,
     "T-25-038": _drive_case_status,
+    "T-25-039": _drive_case_assign,
 }
 
 

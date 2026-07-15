@@ -353,6 +353,16 @@ cases:
     - "fill + classify injury → 'A lawyer will call you'"
   expect: { incomplete_label: "information", likely_label: "recovering", injury_label: "lawyer" }
 
+- id: T-25-039
+  gate: G-DASH
+  desc: "case assignment — admin only, audit tracks old + new assignee"
+  flow:
+    - "POST /api/staff/cases/{ref}/assign as legal_staff → 403"
+    - "POST as admin → 200"
+    - "POST re-assign → previously tracked"
+    - "POST invalid email → 400"
+  expect: { admin_200: true, legal_403: true, previous_tracked: true, invalid_400: true }
+
 coverage_assertion:
   gates_exercised: [G-41, G-42, G-43, G-44, G-45, G-46, G-47, G-48, G-49, G-57, G-T6, G-EV, G-PD-DISC]
   parity_proven: true
