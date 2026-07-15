@@ -349,26 +349,17 @@ class S3EvidenceStore:
     def _mint_signed_url(self, key: str) -> str:
         """Mint a presigned GET URL for a private S3 object.
 
-        SSE-KMS fix (2026-07-16): S3 buckets with SSE-KMS require SigV4 for
-        presigned URLs. boto3's generate_presigned_url defaults to SigV4, but
-        the presigned URL must carry the encryption context headers so S3
-        validates the signature against them. The `Config(signature_version=
-        's3v4')` forces SigV4; the SSE-KMS header in Params makes the
-        signature bound to the encryption parameters.
+        SSE-KMS fix (2026-07-16): the S3 client is configured with SigV4 at
+        construction time (see __init__). Presigned URLs for KMS-encrypted
+        objects must be SigV4 — SigV2 is rejected with 'InvalidArgument'.
         """
-        from botocore.config import Config as BotoConfig
-        s3_v4 = self._s3.meta.client  # the client already uses SigV4 by default
         params: dict[str, Any] = {
             "Bucket": self._bucket,
             "Key": key,
         }
-        # For AWS-managed KMS keys (aws/s3), SigV4 is sufficient without
-        # specifying the key ID — the key is implied by the bucket's default
-        # encryption config. For CMK, include the key ID so the signature
-        # is bound to it.
         if self._kms_key_id:
             params["x-amz-server-side-encryption-aws-kms-key-id"] = self._kms_key_id
-        url = s3_v4.generate_presigned_url(
+        url = self._s3.generate_presigned_url(
             "get_object",
             Params=params,
             ExpiresIn=SIGNED_URL_TTL_SECONDS,
