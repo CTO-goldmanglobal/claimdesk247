@@ -89,7 +89,16 @@ CLAIM_TYPE_SLOT: dict[str, Any] = {
     "id": 100,
     "slot": "claim_type",
     "type": "enum",
-    "options": ["motor", "property_damage", "public_liability", "medical_negligence"],
+    # CD-R3 (2026-07-14): public_liability + medical_negligence are
+    # personal-injury claim types. NSW's 2025 claim-farming regimes
+    # prohibit sourcing/referring injury leads for consideration, and
+    # ClaimDesk is not currently under a law practice. Until a lawful
+    # structure for injury intake exists (Structure B in CD-R3 §6), the
+    # engine MUST NOT offer PL or med-neg as customer-selectable claim
+    # types. They remain in the registry (the trees are signed) so the
+    # engine can still classify them if reached programmatically, but
+    # the customer never sees them as options.
+    "options": ["motor", "property_damage"],
     "mandatory": True,
 }
 
@@ -110,7 +119,7 @@ FRONTEND_MOTOR_SLOTS: list[dict[str, Any]] = [
 # (collected at end; any injury → esc-injury → PI pathway, hard firewall).
 PD_SLOTS: list[dict[str, Any]] = [
     {"id": 1, "slot": "state_of_accident", "type": "enum", "options": list(MULTI_STATE_OPTIONS), "mandatory": True},
-    {"id": 100, "slot": "claim_type", "type": "enum", "options": ["motor", "property_damage", "public_liability", "medical_negligence"], "mandatory": True},
+    {"id": 100, "slot": "claim_type", "type": "enum", "options": ["motor", "property_damage"], "mandatory": True},
     {"id": 400, "slot": "collision_type", "type": "enum", "options": ["rear-end", "T-intersection", "give_way", "reversing", "parked_hit", "parking", "sideswipe_same_direction", "lane_change", "car_park", "other"], "mandatory": True},
     {"id": 401, "slot": "incident_date", "type": "text", "mandatory": True},
     {"id": 402, "slot": "user_vehicle", "type": "text", "mandatory": True},
@@ -134,7 +143,7 @@ PD_SLOTS: list[dict[str, Any]] = [
 # 7) is NOT shown for PL. Injuries is shared (collected at the end).
 PL_SLOTS: list[dict[str, Any]] = [
     {"id": 1, "slot": "state_of_accident", "type": "enum", "options": ["NSW", "outside_nsw"], "mandatory": True},
-    {"id": 100, "slot": "claim_type", "type": "enum", "options": ["motor", "public_liability", "medical_negligence"], "mandatory": True},
+    {"id": 100, "slot": "claim_type", "type": "enum", "options": ["motor", "property_damage"], "mandatory": True},
     {"id": 200, "slot": "incident_date", "type": "text", "mandatory": True},
     {"id": 201, "slot": "pl_location", "type": "enum", "options": ["supermarket", "shopping_centre", "footpath_council", "private_premises", "workplace", "construction_site", "rental_property", "commercial_premises", "stairwell", "car_park", "corridor", "other"], "mandatory": True},
     {"id": 202, "slot": "hazard_type", "type": "enum", "options": ["wet_surface", "spill", "rain_tracked", "cleaning", "uneven_surface", "broken_pavement", "mat", "cabling", "step", "pothole", "falling_object", "stock", "signage", "inadequate_lighting", "defective_premises", "broken_rail", "broken_stair", "fixture", "other_public_place", "other"], "mandatory": True},
@@ -151,7 +160,7 @@ PL_SLOTS: list[dict[str, Any]] = [
 # slots exist to structure the case file for the lawyer, not to band.
 MEDNEG_SLOTS: list[dict[str, Any]] = [
     {"id": 1, "slot": "state_of_accident", "type": "enum", "options": ["NSW", "outside_nsw"], "mandatory": True},
-    {"id": 100, "slot": "claim_type", "type": "enum", "options": ["motor", "public_liability", "medical_negligence"], "mandatory": True},
+    {"id": 100, "slot": "claim_type", "type": "enum", "options": ["motor", "property_damage"], "mandatory": True},
     {"id": 300, "slot": "provider_type", "type": "enum", "options": ["gp", "hospital", "specialist", "surgeon", "dentist", "cosmetic", "pharmacy", "birth_centre", "other"], "mandatory": True},
     {"id": 301, "slot": "provider_public_private", "type": "enum", "options": ["public", "private", "unsure"], "mandatory": False},
     {"id": 302, "slot": "treatment_type", "type": "enum", "options": ["surgical_outcome", "misdiagnosis_delay", "medication_error", "birth_injury", "cosmetic", "dental", "consent_not_informed", "other"], "mandatory": True},
