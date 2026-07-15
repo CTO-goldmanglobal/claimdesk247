@@ -1413,6 +1413,148 @@ def create_app() -> FastAPI:
         return {"corrected": True, "slot": slot_name,
                 "old_value": old_value, "new_value": new_value}
 
+    # ---- Staff auth helper (DASHBOARD-SPEC 2026-07-15) ----
+    # Reusable: verify the JWT/stub, resolve the User, enforce role + AAL2.
+    # All staff/operator endpoints call this instead of duplicating the
+    # auth block from /api/brief.
+    def _require_staff_user(request: Request,
+                            *allowed_roles: str) -> Any:
+        """Verify auth + AAL2 + role. Returns the authenticated User object.
+        Raises HTTPException(403) on any failure. The role check happens
+        AFTER resolution so the caller sees 'role X not in Y' (helpful for
+        debugging), not just a bare 403."""
+        if _brief_auth_mode() == "jwt":
+            authz = request.headers.get("authorization", "")
+            token = authz[7:].strip() if authz[:7].lower() == "bearer " else ""
+            claims = _verify_supabase_jwt(token)
+            if not claims:
+                raise HTTPException(status_code=403,
+                                    detail="invalid or missing bearer token")
+            if claims.get("aal") != "aal2":
+                raise HTTPException(status_code=403, detail="MFA (AAL2) required")
+            email = claims.get("email")
+            if not email:
+                raise HTTPException(status_code=403,
+                                    detail="token missing email claim")
+            try:
+                user = stage3_auth.authenticate(email)
+            except stage3_auth.AuthError as exc:
+                raise HTTPException(status_code=403, detail=str(exc))
+        else:
+            # Stub path: as_email query param + X-MFA-Verified header.
+            email = request.query_params.get("as_email")
+            if not email:
+                raise HTTPException(status_code=403,
+                                    detail="auth required (as_email stub)")
+            try:
+                user = stage3_auth.authenticate(email)
+            except stage3_auth.AuthError as exc:
+                raise HTTPException(status_code=403, detail=str(exc))
+            if not _mfa_satisfied(request):
+                raise HTTPException(
+                    status_code=403,
+                    detail="MFA required (X-MFA-Verified: 1 header missing)",
+                )
+        # Role check
+        if allowed_roles and user.role not in allowed_roles:
+            raise HTTPException(
+                status_code=403,
+                detail=f"role {user.role!r} not in {list(allowed_roles)}",
+            )
+        return user
+
+    # ---- A1: GET /api/staff/cases (DASHBOARD-SPEC §A1) ----
+    # Role-filtered case queue for the staff dashboard. Replaces the
+    # hardcoded ROWS in dashboard.tsx. legal_staff/admin see the full
+    # queue (incl. injury-escalated); panel_shop_staff sees only
+    # intake-completed cases with damage context (no identity, no brief).
+    @app.get("/api/staff/cases")
+    def staff_list_cases(request: Request,
+                         status_filter: str = "",
+                         page: int = 1,
+                         page_size: int = 50) -> Any:
+        """List cases the caller is allowed to work. Role-scoped:
+        - legal_staff / admin / operator: full queue, includes identity +
+          injury-escalated cases
+        - panel_shop_staff: only intake_completed=true cases, NO identity,
+          NO injury-escalated (CD-R3 firewall: panel shop never sees injury)
+        """
+        user = _require_staff_user(
+            request,
+            "panel_shop_staff", "legal_staff", "admin", "operator",
+        )
+        ip = _client_ip(request)
+        if not READ_RATE_LIMITER.allow(ip):
+            raise HTTPException(status_code=429,
+                                detail="rate limit exceeded; retry after a minute",
+                                headers={"Retry-After": "60"})
+        # Iterate sessions. In-memory store uses .list(); production Supabase
+        # store should add a purpose-built SQL query with proper pagination.
+        sessions_iter = (
+            SESSIONS.list() if hasattr(SESSIONS, "list")
+            else (SESSIONS.all() if hasattr(SESSIONS, "all") else [])
+        )
+        items: list[dict[str, Any]] = []
+        for s in sessions_iter:
+            escalated = (s.engine_result.escalation if s.engine_result else None)
+            intake_done = s.state in (
+                "S5-FAULT-INFO", "S6-EVIDENCE", "S7-NEXT-STEPS", "S8-CLOSE",
+                "S4-CLASSIFY",
+            ) or bool(s.engine_result)
+            # Role filtering:
+            # panel_shop_staff never sees injury-escalated cases (CD-R3).
+            if (user.role == "panel_shop_staff"
+                    and escalated == "esc-injury"):
+                continue
+            # panel_shop_staff only sees completed intakes (they schedule
+            # repairs, not work-in-progress cases).
+            if user.role == "panel_shop_staff" and not intake_done:
+                continue
+            # Optional status filter (open / in_review / escalated / closed).
+            # For now, 'open' = not completed; 'escalated' = has escalation.
+            if status_filter == "open" and intake_done:
+                continue
+            if status_filter == "escalated" and not escalated:
+                continue
+            identity = s.intake.get("_identity", {})
+            # panel_shop_staff: redact identity (CD-R3 + privacy).
+            if user.role == "panel_shop_staff":
+                customer_view = None
+            else:
+                customer_view = {
+                    "name": identity.get("customer_name"),
+                    "mobile": identity.get("customer_mobile"),
+                    "email": identity.get("customer_email"),
+                } if identity else None
+            items.append({
+                "ref": s.reference,
+                "created_at": s.created_at,
+                "state": s.intake.get("state_of_accident") or s.intake.get("state"),
+                "claim_type": s.intake.get("claim_type"),
+                "band": s.engine_result.band if s.engine_result else None,
+                "escalated": escalated,
+                "intake_completed": intake_done,
+                "customer": customer_view,
+            })
+        # Pagination (simple slice; production uses SQL OFFSET/LIMIT).
+        total = len(items)
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_items = items[start:end]
+        AUDIT.append(
+            session_id=f"staff:{user.email}", user=user.email,
+            action="staff_cases_listed",
+            inputs={"role": user.role, "status_filter": status_filter,
+                    "page": page, "returned": len(page_items)},
+            rule_path=[], output={"total": total},
+        )
+        return {
+            "items": page_items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
     # ---- /api/classify (G-41, G-42, G-43) ----
     def _render_pdf_for_session(s: Any) -> bytes:
         """Render the customer-facing summary PDF for a session.

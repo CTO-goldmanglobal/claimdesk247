@@ -1,15 +1,17 @@
 """Auth + role middleware for the dashboard.
 
-Roles (G-33):
-    customer            — no dashboard access
-    panel_shop_staff    — dashboard list, summary, PDF download, notes
-    legal_staff         — list + intake brief + callback notes + audit-log view
-    admin               — everything + audit-log export
+Roles (G-33 + DASHBOARD-SPEC 2026-07-15):
+    customer            — no staff dashboard access (only their own case via /my-cases)
+    panel_shop_staff    — staff dashboard: list, summary, no identity/brief
+    legal_staff         — staff dashboard: list + intake brief + audit-log view
+    admin               — everything + audit-log export + case assignment
+    operator            — operator dashboard: system health, audit viewer,
+                          retention trigger (added 2026-07-15)
 
-The middleware checks roles server-side (not just UI hiding). The
-production deployment will wire a real OIDC/SAML provider behind this
-interface; Stage 3 ships a stub auth backed by a hard-coded test user
-list so the gate can be tested. MFA is Stage 4.
+The middleware checks roles server-side (not just UI hiding). Production
+reads the role from the `user_roles` Supabase table (looked up by the JWT's
+email claim); Stage 3 ships a stub auth backed by a hard-coded test user
+list so the gate can be tested without Supabase auth configured.
 """
 from __future__ import annotations
 
@@ -17,7 +19,7 @@ from dataclasses import dataclass
 from typing import Iterable
 
 
-ROLES = ("customer", "panel_shop_staff", "legal_staff", "admin")
+ROLES = ("customer", "panel_shop_staff", "legal_staff", "admin", "operator")
 
 
 @dataclass(frozen=True)
@@ -30,12 +32,15 @@ class User:
         return self.role in allowed
 
 
-# Test/stub user table. Stage 4 replaces with a real identity provider.
+# Test/stub user table. Production looks up role from the user_roles table
+# via Supabase (see wrap.py::_resolve_user_from_jwt). These stubs are the
+# fallback for test mode + dev environments without Supabase auth configured.
 STUB_USERS: dict[str, "User"] = {
     "alice@customer.example": User(email="alice@customer.example", role="customer", display_name="Alice Customer"),
     "pat@panel.example":     User(email="pat@panel.example",     role="panel_shop_staff", display_name="Pat Panel"),
     "lou@legal.example":     User(email="lou@legal.example",     role="legal_staff",     display_name="Lou Legal"),
     "ada@admin.example":     User(email="ada@admin.example",     role="admin",           display_name="Ada Admin"),
+    "ops@operator.example":  User(email="ops@operator.example",  role="operator",        display_name="Ops Operator"),
 }
 
 
@@ -63,4 +68,4 @@ def require_role(user: "User" | None, *allowed: str) -> "User":
 
 def dashboard_visible_for(user: "User") -> bool:
     """Server-side check. Customers are blocked (G-33)."""
-    return user.role in ("panel_shop_staff", "legal_staff", "admin")
+    return user.role in ("panel_shop_staff", "legal_staff", "admin", "operator")

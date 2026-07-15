@@ -1110,6 +1110,89 @@ def _drive_slot_correction(client: HTTPClient, case: dict) -> tuple[bool, str]:
     return True, "slot corrected + audited (old+new); invalid enum → 400"
 
 
+# -----------------------------------------------------------------------
+# Feature 6 — Staff dashboard endpoints (DASHBOARD-SPEC 2026-07-15)
+# -----------------------------------------------------------------------
+
+def _drive_staff_cases_legal(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-DASH: GET /api/staff/cases as legal_staff → sees the queue including
+    identity; auth required (403 without); customer role blocked."""
+    # No auth → 403.
+    code, _, _ = client.request("GET", "/api/staff/cases")
+    if code != 403:
+        return False, f"no-auth should 403, got {code}"
+    # As legal_staff (stub mode: as_email + X-MFA-Verified).
+    code2, body2, _ = client.request(
+        "GET", "/api/staff/cases?as_email=lou@legal.example",
+        headers={"X-MFA-Verified": "1"},
+    )
+    if code2 != 200:
+        return False, f"legal_staff should 200, got {code2}: {body2}"
+    if "items" not in (body2 or {}):
+        return False, f"missing items: {body2}"
+    # Customer role → 403.
+    code3, _, _ = client.request(
+        "GET", "/api/staff/cases?as_email=alice@customer.example",
+        headers={"X-MFA-Verified": "1"},
+    )
+    if code3 != 403:
+        return False, f"customer should 403, got {code3}"
+    # No MFA header → 403.
+    code4, _, _ = client.request(
+        "GET", "/api/staff/cases?as_email=lou@legal.example",
+    )
+    if code4 != 403:
+        return False, f"no MFA should 403, got {code4}"
+    return True, "staff cases: legal_staff 200, customer 403, no-auth 403, no-MFA 403"
+
+
+def _drive_staff_cases_panel_shop_redacted(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-DASH + CD-R3: panel_shop_staff sees completed cases but NEVER sees
+    identity or injury-escalated cases. The injury firewall holds at the
+    staff-dashboard layer too."""
+    # Create a completed case with identity + band.
+    ref = _create_session(client)
+    _accept_consent(client, ref)
+    client.request("POST", f"/api/session/{ref}/identity",
+        json={"customer_name": "Secret Customer",
+              "customer_mobile": "0412345678",
+              "customer_email": "secret@test.com"})
+    # Fill minimum intake + classify so it's "completed".
+    _fill_intake(client, ref, {
+        "state_of_accident": "NSW", "accident_type": "rear-end",
+        "datetime_location": "x", "user_vehicle": "x", "other_vehicles": "x",
+        "movement_description": "x", "damage_locations": "rear",
+        "control_devices": "none", "police_attendance": "no",
+        "injuries": "none",
+    })
+    client.request("POST", "/api/classify", json={"reference": ref})
+    # panel_shop_staff views the queue.
+    code, body, _ = client.request(
+        "GET", "/api/staff/cases?as_email=pat@panel.example",
+        headers={"X-MFA-Verified": "1"},
+    )
+    if code != 200:
+        return False, f"panel_shop should 200, got {code}: {body}"
+    items = (body or {}).get("items", [])
+    # The case should be visible (intake completed).
+    matching = [i for i in items if i.get("ref") == ref]
+    if not matching:
+        return False, f"case {ref} not visible to panel_shop: {items[:2]}"
+    # Identity MUST be redacted.
+    if matching[0].get("customer") is not None:
+        return False, f"identity NOT redacted for panel_shop: {matching[0]}"
+    # legal_staff sees identity.
+    code2, body2, _ = client.request(
+        "GET", "/api/staff/cases?as_email=lou@legal.example",
+        headers={"X-MFA-Verified": "1"},
+    )
+    items2 = (body2 or {}).get("items", [])
+    matching2 = [i for i in items2 if i.get("ref") == ref]
+    if matching2 and matching2[0].get("customer") is None:
+        return False, f"identity missing for legal_staff: {matching2[0]}"
+    return True, "panel_shop: identity redacted; legal_staff: identity visible"
+
+
 DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-001": lambda c, x: _drive_classify_parity(c, x, REAR_END_INTAKE),
     "T-25-002": lambda c, x: _drive_classify_parity(c, x, GIVEWAY_INTAKE),
@@ -1150,6 +1233,9 @@ DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-033": _drive_identity_capture,
     "T-25-034": _drive_bind_user_and_list_cases,
     "T-25-035": _drive_slot_correction,
+    # ---- Feature 6: staff dashboard endpoints (DASHBOARD-SPEC) ----
+    "T-25-036": _drive_staff_cases_legal,
+    "T-25-037": _drive_staff_cases_panel_shop_redacted,
 }
 
 

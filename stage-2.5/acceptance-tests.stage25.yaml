@@ -324,6 +324,26 @@ cases:
     - "PATCH invalid enum → 400"
   expect: { corrected: true, old_value: NSW, new_value: VIC, audit_action: slot_corrected, invalid_400: true }
 
+# ---- Feature 6: staff dashboard endpoints (DASHBOARD-SPEC 2026-07-15) ----
+- id: T-25-036
+  gate: G-DASH
+  desc: "staff cases list — legal_staff 200, customer 403, no-auth 403, no-MFA 403"
+  flow:
+    - "GET /api/staff/cases (no auth) → 403"
+    - "GET /api/staff/cases?as_email=lou@legal.example + X-MFA-Verified → 200"
+    - "GET as customer → 403"
+    - "GET without MFA → 403"
+  expect: { legal_200: true, customer_403: true, no_auth_403: true, no_mfa_403: true }
+
+- id: T-25-037
+  gate: G-DASH
+  desc: "panel_shop_staff identity redaction + CD-R3 injury firewall at dashboard layer"
+  flow:
+    - "create completed case with identity"
+    - "GET as panel_shop_staff → case visible but customer=null"
+    - "GET as legal_staff → customer identity visible"
+  expect: { panel_shop_redacted: true, legal_staff_visible: true }
+
 coverage_assertion:
   gates_exercised: [G-41, G-42, G-43, G-44, G-45, G-46, G-47, G-48, G-49, G-57, G-T6, G-EV, G-PD-DISC]
   parity_proven: true
