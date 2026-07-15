@@ -6,12 +6,37 @@
 
 **Why:** The live landing (claimdesk247.com.au) is under-furnished — thin content, big whitespace gaps, no trust scaffolding, and (critically) no link to the `/crash` Golden Rules PWA. This rebuild makes the page *trustworthy* by leading with radical transparency: in a sector with a claim-farming reputation, the differentiator is publishing what we WON'T do.
 
-**Reviewed against Opus governance spine** (`handoff/PROJECT-SUMMARY-FOR-OPUS.md`, 2026-06-13) + the NSW-only engine state as of backend `743a214` (2026-07-15). Key alignments enforced below:
-- **Geography: NSW-only.** Engine accepts `NSW` + `outside_nsw` (which escalates to human callback). Do NOT promise "Australia-wide" anywhere — it overpromises against an engine that can't deliver. Chips, footer, and FAQ must reflect this.
+**Reviewed against Opus governance spine** (`handoff/PROJECT-SUMMARY-FOR-OPUS.md`, 2026-06-13) + the NSW-only engine state of backend `743a214` (2026-07-15) + the slot-stage escalation contract of backend `c6ddc16` (2026-07-16). Key alignments enforced below:
+
+### Opus spine — full enforcement map (all 6 non-negotiables, §3.1–§3.6)
+
+Opus's governance spine has six items. Every one maps to a concrete build instruction in this spec — no principle is left as "context only".
+
+| Opus spine | What it means for THIS landing build |
+|---|---|
+| **§3.1 Engine decides, LLM describes** | **No AI/LLM language anywhere on the landing.** Don't write "our AI assesses", "smart algorithms", "machine learning", "intelligent evaluation". The product is a deterministic rule tree. The honest framing is "clear general information based on what you tell us" — already in the copy. The word "engine" is fine (it's the actual architecture); the word "AI" is not, because it implies probabilistic judgement the system doesn't make. |
+| **§3.2 No fault percentage — confidence words only** | The FAQ entry "Do you tell me if I was at fault?" already enforces this ("No... we never tell you a percentage or a fault score"). Do NOT add any "see your chances" / "likelihood of success" CTA. The engine outputs `likely / possible / unclear / insufficient` — words, never numbers. The landing must not promise anything stronger. |
+| **§3.3 Fixed disclaimers, rendered verbatim** | Every advice-adjacent section carries "general information, not legal advice" as a muted footnote. Spec §2 (what's-the-catch strip) and §4 (transparency block) both have it. Keep every existing disclaimer on the page; add the disclaimer to the new sections per the inline instructions. |
+| **§3.4 Escalation is terminal** | The prerequisite (slot-stage escalation fix) makes this concrete: when the engine escalates (`esc-injury`, `state-scope`, `reprompt-cap`, `unmapped-accident-type`), the conversation STOPS. **Do NOT add "try again", "continue anyway", or "skip this question" buttons** on the escalation handoff panels. Terminal means terminal — a real human takes over. The landing's transparency block is the only place escalation is mentioned, and it must frame it as protective ("we stop and a real person calls you"), not as a failure mode. |
+| **§3.5 Residency — all data + inference in Australia** | Trust row §7 includes "Data stays in Australia" as a verifiable trust fact (Supabase Sydney, Vercel `syd1`). Keep this. Do NOT claim hosting in specific cities or regions beyond "Australia" — the spine says Australia, and over-specificity (e.g. "Sydney") could become wrong if infra moves within AU. |
+| **§3.6 Immutable audit trail (append-only)** | **Currently missing from the landing — ADD IT.** The trust row §7 should include a fourth card: `ShieldCheck` icon → **"Every action on your case is recorded"** → "Your case file has a tamper-evident log — every consent, every detail, every photo. It's there for your protection, and ours." This is a real, verifiable system property (`stage-3/app/audit.py` is append-only; no UPDATE/DELETE to any role) and it's a stronger trust fact than most competitors can honestly claim. |
+
+### Additional alignments
+
+- **Geography: NSW-only.** Engine accepts `NSW` + `outside_nsw` (which escalates to human callback via `state-scope`). Do NOT promise "Australia-wide" anywhere — it overpromises against an engine that can't deliver. Chips, footer, and FAQ must reflect this.
 - **No fault decision by us** (Opus §3.2). The FAQ must include "Do you tell me if I was at fault?" → "No."
 - **Fixed disclaimers rendered verbatim** (Opus §3.3). Every new section that could read as advice carries "general information, not legal advice."
 - **Fee structure not specified.** Stage 5 Legal Head decision (Opus §14). The "how do you make money?" FAQ stays structural — "paid by the at-fault insurer, never by you, fee agreed up front" — not specific (no %, no contingency wording).
 - **CD-R3 injury firewall as headline trust asset** — strategic upgrade from Opus's compliance framing. Don't soften it.
+
+### Opus §10 next-actions — status
+
+| Opus §10 action | Status when spec was written | Note for GLM |
+|---|---|---|
+| #1 Wire engine, flip off preview mode | ✅ DONE — submodule commit `11af579` committed `.env.production` with `VITE_API_BASE_URL`. Live site calls the real engine. | Don't re-fix; verify only. |
+| #2 Weblink acceptance tests | Backend owns | Not a landing concern |
+| #3 Close CORS CR-5-02 | Backend owns | Not a landing concern |
+| #4 Stage 4 open items + sign-off package | Backend + Legal Head | Not a landing concern |
 
 ---
 
@@ -120,12 +145,15 @@ This section is the "insurance you hope never to use" hook — installing it is 
 
 ### 7. Trust-proof row (NEW — verifiable only)
 
-Heading: **"Built to be trusted."** A row of 3-4 cards, each a *verifiable* trust fact (NO testimonials, NO fabricated numbers):
+Heading: **"Built to be trusted."** A row of 4 cards, each a *verifiable* trust fact (NO testimonials, NO fabricated numbers):
 
 - **Data stays in Australia** (`Lock`/`MapPin`) — "Your details are hosted in Australia and never sold."
 - **Your evidence is sealed** (`ShieldCheck`) — "Every photo and detail is timestamped and tamper-evident, so your record holds up."
+- **Every action on your case is recorded** (`FileText`/`History`) — "Your case file has a tamper-evident log — every consent, every detail, every photo. It's there for your protection, and ours." (Opus §3.6: immutable append-only audit trail — `stage-3/app/audit.py`. Stronger trust fact than competitors can honestly claim.)
 - **Repairs by an accredited local shop** (`Wrench`) — use `PANEL_SHOP_NAME` from `@/lib/config` (currently "Petersham Prestige Smash Repairs").
 - **Powered by Goldman Forge** (`Building2`/`Scale`) — the operator/technology backer.
+
+(5 cards if "Powered by Goldman Forge" gets its own; alternatively fold it into the footer and keep the row at 4. GLM's call based on visual balance at 390px.)
 
 Import `PANEL_SHOP_NAME` from `@/lib/config`.
 
