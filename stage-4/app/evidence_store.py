@@ -339,10 +339,28 @@ class S3EvidenceStore:
     # ----- internal -----
 
     def _mint_signed_url(self, key: str) -> str:
+        """Mint a presigned GET URL for a private S3 object.
+
+        SSE-KMS fix (2026-07-16): when the bucket uses SSE-KMS (our default),
+        presigned URLs MUST be generated with SigV4 and include the encryption
+        header. boto3's generate_presigned_url uses SigV4 by default, but the
+        Params dict must carry the SSE header so S3 validates the signature
+        against it. Without this, the upload succeeds but the signed URL
+        returns 403 'Requests specifying Server Side Encryption with AWS KMS
+        managed keys require AWS Signature Version 4.'
+        """
+        params: dict[str, Any] = {
+            "Bucket": self._bucket,
+            "Key": key,
+        }
+        # If we're using a CMK, the signed URL must reference it too.
+        if self._kms_key_id:
+            params["x-amz-server-side-encryption-aws-kms-key-id"] = self._kms_key_id
         url = self._s3.generate_presigned_url(
             "get_object",
-            Params={"Bucket": self._bucket, "Key": key},
+            Params=params,
             ExpiresIn=SIGNED_URL_TTL_SECONDS,
+            HttpMethod="GET",
         )
         return url
 
