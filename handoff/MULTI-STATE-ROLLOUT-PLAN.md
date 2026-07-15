@@ -48,24 +48,48 @@ clean of Lane 2 (CTP injury / claim-farming) exposure. Adding a state does not
 weaken this firewall — it is enforced globally before any per-state resolution
 (see `_check_global_escalations` in `engine.py`).
 
-## 3. Rollout sequence (recommended)
+## 3. Rollout sequence — three stages (2026-07-15 user decision)
 
-Order by market size × legal simplicity:
+**Stage 1 — NSW only (CURRENT — live since 2026-07-05)**
+- NSW motor + property_damage live and banding
+- State dropdown: `NSW` + `outside_nsw` only
+- Claim types: `motor` + `property_damage` only (CD-R3: no PL, no med-neg)
+- All other states → `state-scope` escalation → human callback (no band)
+- Any injury mention → `esc-injury` → human callback (all states, fires first)
 
-1. **VIC** — biggest market after NSW; 6 yr limitation; *Limitation of Actions Act 1958*;
-   ACL via Consumer Affairs Victoria; no PD-specific claim-farming statute (PD-only
-   exempt). Road rules = *Road Safety Road Rules 2017* (numbered identically to ARR).
-2. **QLD** — third-largest; 6 yr; *Personal Injuries Proceedings Act 2002* (PIP Act)
-   is injury-focused so PD-only should be exempt, but the CD-R2 memo must explicitly
-   prove it. Road rules = *Transport Operations (Road Use Management—Road Rules)
-   Regulation 2009*.
-3. **WA** — 6 yr; *Limitation Act 2005*; smaller market; *Road Traffic Code 2000*.
-4. **SA** — 6 yr; *Limitation of Actions Act 1936*; *Australian Road Rules (Applied
-   Legislation) Act 2016*.
-5. **TAS** — 6 yr; *Limitation Act 1974*.
-6. **ACT** — 6 yr; *Limitation Act 1985*; *Road Transport (Road Rules) Regulation 2017*.
-7. **NT** — **3 yr** limitation (notably shorter — quantum wording must reflect this);
-   *Limitation Act 1981*.
+**Stage 2 — + VIC, QLD (after their verify items close)**
+- Prerequisites per CD-R3 + PD-COUNSEL-MEMO:
+  - VIC: consumer-affairs licensing verify; citation audit (Road Safety Road Rules 2017)
+  - QLD: OFT position resolved (CONDITIONAL GO in counsel memo §2.2); citation audit (TORUM)
+- When ready: re-sign VIC + QLD PD trees; relax dropdown to `[NSW, VIC, QLD, outside_nsw]`
+
+**Stage 3 — Australia-wide (after all state verify items close)**
+- Add WA, SA, TAS, ACT, NT
+- Prerequisites per counsel memo §2.2:
+  - WA: Debt Collectors Licensing Act 1964 verify
+  - SA: current debt-collection instrument confirmed
+  - TAS: light regime verify
+  - ACT: Agents Act 2003 verify
+  - NT: Limitation Act 1981 verify (3-year — already enforced engine-side)
+- Relax dropdown to all 8 AU states; citation audit must complete for each tree
+
+**Stage transition gate (every stage):**
+1. Legal Head sign-off per state (CD-R2 + PD counsel memo closed)
+2. Citation audit complete (P1-3 — no wrong-state road-rule labels)
+3. Exception probes wired into classification_questions (P1-4)
+4. Engine tree signed via `sign_rule_trees.py --tree <STATE>.property_damage`
+5. State-scope guard relaxed to accept the new state
+6. Dropdown updated in `MULTI_STATE_OPTIONS`
+7. Full test suite green + acceptance tests for the new state added
+
+**Per-state legal context (for reference):**
+- **VIC** — 6 yr limitation (Limitation of Actions Act 1958); Road Safety Road Rules 2017
+- **QLD** — 6 yr (Limitation of Actions Act 1974); TORUM Road Rules Reg 2009; PIP Act 2002 (CONDITIONAL GO)
+- **WA** — 6 yr (Limitation Act 2005); Road Traffic Code 2000
+- **SA** — 6 yr (Limitation of Actions Act 1936); ARR applied legislation
+- **TAS** — 6 yr (Limitation Act 1974); Road Rules 2019
+- **ACT** — 6 yr (Limitation Act 1985); Road Transport (Road Rules) Regulation 2017
+- **NT** — **3 yr** (Limitation Act 1981); ARR applied — shorter period enforced engine-side
 
 ## 4. Per-state rollout checklist (the unit of one state enablement)
 
