@@ -1671,6 +1671,155 @@ def create_app() -> FastAPI:
         return {"ref": ref, "assigned_to": assignee,
                 "previously": old_assignee}
 
+    # ---- C1: GET /api/operator/audit (DASHBOARD-SPEC §C1) ----
+    # Operator-only audit log viewer. Reads from the in-memory AUDIT log
+    # (production: reads from the audit_log table via Supabase). Filters:
+    # action, ref (reference), since (ISO date). Paginated.
+    @app.get("/api/operator/audit")
+    def operator_audit(request: Request,
+                       action: str = "",
+                       ref: str = "",
+                       since: str = "",
+                       page: int = 1,
+                       page_size: int = 100) -> Any:
+        """Audit log viewer (operator only). Returns events filtered by
+        action, reference, and date. The audit log is append-only; this
+        endpoint is read-only."""
+        user = _require_staff_user(request, "operator")
+        events = AUDIT.all()
+        # Filter by action.
+        if action:
+            events = [e for e in events if e.action == action]
+        # Filter by reference (search in inputs).
+        if ref:
+            events = [e for e in events
+                      if ref in str(e.inputs) or ref in str(e.output)]
+        # Filter by since (ISO date).
+        if since:
+            events = [e for e in events if e.timestamp >= since]
+        # Reverse chronological (most recent first).
+        events = list(reversed(events))
+        total = len(events)
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_events = [
+            {
+                "id": e.entry_id,
+                "ts": e.timestamp,
+                "session_id": e.session_id,
+                "user": e.user,
+                "action": e.action,
+                "inputs": e.inputs,
+                "output": e.output,
+            }
+            for e in events[start:end]
+        ]
+        return {"events": page_events, "total": total,
+                "page": page, "page_size": page_size}
+
+    # ---- C2: GET /api/operator/health (DASHBOARD-SPEC §C2) ----
+    # Operator-only system health summary. Consolidates engine version +
+    # rule-tree sign-off status + evidence store state + session counts.
+    @app.get("/api/operator/health")
+    def operator_health(request: Request) -> Any:
+        """System health summary (operator only)."""
+        user = _require_staff_user(request, "operator")
+        # Rule-tree versions (same as /healthz but operator-gated).
+        tree = stage3_engine._load_rule_tree()  # NSW motor (back-compat)
+        registry = getattr(stage3_engine, "RULE_TREE_REGISTRY",
+                           {("NSW", "motor"): "rule-tree.nsw.v3.json"})
+        registry_keys = sorted(registry.keys())
+        rule_tree_versions: dict[str, Any] = {}
+        for (state, claim_type) in registry_keys:
+            label = f"{state}.{claim_type}"
+            try:
+                ct_tree = stage3_engine._load_rule_tree_for(claim_type, state)
+            except Exception as exc:
+                rule_tree_versions[label] = {"error": str(exc)}
+                continue
+            scenarios = ct_tree.get("scenarios", [])
+            current_hash = stage3_engine._compute_scenarios_hash(ct_tree)
+            signed_current = sum(
+                1 for s in scenarios
+                if isinstance(s.get("legal_signoff"), dict)
+                and s["legal_signoff"].get("approved") is True
+                and s["legal_signoff"].get("version") == current_hash
+            )
+            rule_tree_versions[label] = {
+                "version": ct_tree.get("version", "unknown"),
+                "hash": current_hash,
+                "scenarios": len(scenarios),
+                "signed_current": signed_current,
+                "live": signed_current == len(scenarios),
+            }
+        # Evidence store state.
+        evidence_state: dict[str, Any] = {"backend": "unknown"}
+        if EVIDENCE_STORE is not None:
+            store_type = type(EVIDENCE_STORE).__name__
+            evidence_state["backend"] = (
+                "s3" if "S3" in store_type else "memory"
+            )
+            if hasattr(EVIDENCE_STORE, "_bucket"):
+                evidence_state["bucket"] = EVIDENCE_STORE._bucket
+        # Session counts.
+        sessions_iter = (
+            SESSIONS.list() if hasattr(SESSIONS, "list")
+            else (SESSIONS.all() if hasattr(SESSIONS, "all") else [])
+        )
+        sessions_list = list(sessions_iter)
+        active = len(sessions_list)
+        escalated_injury = sum(
+            1 for s in sessions_list
+            if (s.engine_result.escalation if s.engine_result else None) == "esc-injury"
+            or getattr(s, "escalation", None) == "esc-injury"
+        )
+        return {
+            "engine": {
+                "version": "1.0.0",
+                "rule_tree_hash": stage3_engine._compute_scenarios_hash(tree),
+            },
+            "rule_tree_versions": rule_tree_versions,
+            "evidence_store": evidence_state,
+            "sessions": {
+                "active": active,
+                "escalated_injury": escalated_injury,
+            },
+        }
+
+    # ---- A4: GET /api/staff/signoffs (DASHBOARD-SPEC §A4) ----
+    # Admin-only pending sign-offs view. Lists rule-tree scenarios awaiting
+    # Legal Head sign-off so admins can see what's blocking go-live.
+    @app.get("/api/staff/signoffs")
+    def staff_signoffs(request: Request) -> Any:
+        """Pending rule-tree sign-offs (admin only)."""
+        user = _require_staff_user(request, "admin", "operator")
+        registry = getattr(stage3_engine, "RULE_TREE_REGISTRY",
+                           {("NSW", "motor"): "rule-tree.nsw.v3.json"})
+        trees = []
+        for (state, claim_type) in sorted(registry.keys()):
+            label = f"{state}.{claim_type}"
+            try:
+                ct_tree = stage3_engine._load_rule_tree_for(claim_type, state)
+            except Exception:
+                continue
+            scenarios = ct_tree.get("scenarios", [])
+            current_hash = stage3_engine._compute_scenarios_hash(ct_tree)
+            signed_current = sum(
+                1 for s in scenarios
+                if isinstance(s.get("legal_signoff"), dict)
+                and s["legal_signoff"].get("approved") is True
+                and s["legal_signoff"].get("version") == current_hash
+            )
+            trees.append({
+                "label": label,
+                "version": ct_tree.get("version", "unknown"),
+                "scenarios": len(scenarios),
+                "signed_current": signed_current,
+                "unsigned": len(scenarios) - signed_current,
+                "live": signed_current == len(scenarios),
+            })
+        return {"trees": trees}
+
     # ---- /api/classify (G-41, G-42, G-43) ----
     def _render_pdf_for_session(s: Any) -> bytes:
         """Render the customer-facing summary PDF for a session.

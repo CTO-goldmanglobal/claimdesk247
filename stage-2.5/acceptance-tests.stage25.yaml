@@ -363,6 +363,31 @@ cases:
     - "POST invalid email → 400"
   expect: { admin_200: true, legal_403: true, previous_tracked: true, invalid_400: true }
 
+- id: T-25-040
+  gate: G-DASH
+  desc: "operator audit viewer — operator 200, legal 403, action filter works"
+  flow:
+    - "GET /api/operator/audit as operator → 200 with events"
+    - "GET as legal_staff → 403"
+    - "GET ?action=session_created → filtered events"
+  expect: { operator_200: true, legal_403: true, filtered: true }
+
+- id: T-25-041
+  gate: G-DASH
+  desc: "operator health summary — engine + rule_trees + sessions"
+  flow:
+    - "GET /api/operator/health as operator → 200"
+    - "GET as admin → 403"
+  expect: { operator_200: true, admin_403: true, has_engine: true }
+
+- id: T-25-042
+  gate: G-DASH
+  desc: "staff signoffs — admin sees live + unsigned trees"
+  flow:
+    - "GET /api/staff/signoffs as admin → tree list"
+    - "NSW motor live=true, VIC PD live=false"
+  expect: { has_trees: true, nsw_live: true, vic_unsigned: true }
+
 coverage_assertion:
   gates_exercised: [G-41, G-42, G-43, G-44, G-45, G-46, G-47, G-48, G-49, G-57, G-T6, G-EV, G-PD-DISC]
   parity_proven: true

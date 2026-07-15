@@ -1283,6 +1283,78 @@ def _drive_case_assign(client: HTTPClient, case: dict) -> tuple[bool, str]:
     return True, "assign: admin 200, legal 403, re-assign tracks previous, invalid → 400"
 
 
+def _drive_operator_audit(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-DASH §C1: GET /api/operator/audit — operator only; legal → 403;
+    supports action filter."""
+    # legal_staff → 403.
+    code, _, _ = client.request("GET",
+        "/api/operator/audit?as_email=lou@legal.example",
+        headers={"X-MFA-Verified": "1"})
+    if code != 403:
+        return False, f"legal_staff should 403, got {code}"
+    # operator → 200.
+    code2, body2, _ = client.request("GET",
+        "/api/operator/audit?as_email=ops@operator.example",
+        headers={"X-MFA-Verified": "1"})
+    if code2 != 200:
+        return False, f"operator should 200, got {code2}: {body2}"
+    if "events" not in (body2 or {}):
+        return False, f"missing events: {body2}"
+    # Filter by action.
+    code3, body3, _ = client.request("GET",
+        "/api/operator/audit?action=session_created&as_email=ops@operator.example",
+        headers={"X-MFA-Verified": "1"})
+    if code3 != 200:
+        return False, f"filtered audit should 200, got {code3}"
+    events3 = (body3 or {}).get("events", [])
+    if events3 and not all(e["action"] == "session_created" for e in events3):
+        return False, f"filter returned wrong actions"
+    return True, f"operator audit: 200 with {len((body2 or {}).get('events', []))} events, legal 403"
+
+
+def _drive_operator_health(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-DASH §C2: GET /api/operator/health — system health summary."""
+    code, body, _ = client.request("GET",
+        "/api/operator/health?as_email=ops@operator.example",
+        headers={"X-MFA-Verified": "1"})
+    if code != 200:
+        return False, f"operator health should 200, got {code}: {body}"
+    if "engine" not in (body or {}):
+        return False, f"missing engine: {body}"
+    if "rule_tree_versions" not in (body or {}):
+        return False, f"missing rule_tree_versions: {body}"
+    if "sessions" not in (body or {}):
+        return False, f"missing sessions: {body}"
+    # Non-operator → 403.
+    code2, _, _ = client.request("GET",
+        "/api/operator/health?as_email=ada@admin.example",
+        headers={"X-MFA-Verified": "1"})
+    if code2 != 403:
+        return False, f"admin should 403 on operator endpoint, got {code2}"
+    return True, "operator health: engine + trees + sessions present, admin 403"
+
+
+def _drive_staff_signoffs(client: HTTPClient, case: dict) -> tuple[bool, str]:
+    """G-DASH §A4: GET /api/staff/signoffs — admin/operator; shows unsigned trees."""
+    code, body, _ = client.request("GET",
+        "/api/staff/signoffs?as_email=ada@admin.example",
+        headers={"X-MFA-Verified": "1"})
+    if code != 200:
+        return False, f"admin signoffs should 200, got {code}: {body}"
+    trees = (body or {}).get("trees", [])
+    if not trees:
+        return False, f"no trees returned: {body}"
+    # NSW motor should be live.
+    nsw_motor = [t for t in trees if t.get("label") == "NSW.motor"]
+    if not nsw_motor or not nsw_motor[0].get("live"):
+        return False, f"NSW motor not live: {nsw_motor}"
+    # Non-NSW PD should be unsigned.
+    vic_pd = [t for t in trees if t.get("label") == "VIC.property_damage"]
+    if vic_pd and vic_pd[0].get("live"):
+        return False, f"VIC PD should be unsigned: {vic_pd}"
+    return True, f"signoffs: {len(trees)} trees, NSW motor live, VIC unsigned"
+
+
 DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-001": lambda c, x: _drive_classify_parity(c, x, REAR_END_INTAKE),
     "T-25-002": lambda c, x: _drive_classify_parity(c, x, GIVEWAY_INTAKE),
@@ -1328,6 +1400,9 @@ DISPATCH: dict[str, Callable[[HTTPClient, dict], tuple[bool, str]]] = {
     "T-25-037": _drive_staff_cases_panel_shop_redacted,
     "T-25-038": _drive_case_status,
     "T-25-039": _drive_case_assign,
+    "T-25-040": _drive_operator_audit,
+    "T-25-041": _drive_operator_health,
+    "T-25-042": _drive_staff_signoffs,
 }
 
 
